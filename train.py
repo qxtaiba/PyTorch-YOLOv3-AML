@@ -101,10 +101,12 @@ def train(hyp):
 
     start_epoch = 0
     best_fitness = 0.0
-
+    
+    attempt_download(weights)
+    if len(weights) > 0:
     # load weights darknet format
     # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
-    load_darknet_weights(model, weights)
+        load_darknet_weights(model, weights)
 
     if opt.freeze_layers:
         output_layer_indices = [idx - 1 for idx, module in enumerate(model.module_list) if isinstance(module, YOLOLayer)]
