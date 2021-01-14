@@ -114,9 +114,6 @@ def train(trainHyperParams):
     model.gr = 1.0  # giou loss ratio (obj_loss = 1.0 or giou)
     model.class_weights = labels_to_class_weights(dataset.labels, numClasses).to(device)  # attach class weights
 
-    # Model EMA
-    ema = torch_utils.ModelEMA(model)
-
     # Start training
     numBatches = len(dataLoader)  # number of batches
     burnInVal = max(3 * numBatches, 500)  # burn-in iterations, max(3 epochs, 500 iterations)
@@ -181,7 +178,6 @@ def train(trainHyperParams):
             if numCompletedBatches % accumulationInterval == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-                ema.update(model)
 
             # Print
             meanLoss = (meanLoss * batchIdx + lossItems) / (batchIdx + 1)  # update mean losses
@@ -201,11 +197,10 @@ def train(trainHyperParams):
         scheduler.step()
 
         # Process epoch results
-        ema.update_attr(model)
         isLastEpoch = epoch + 1 == numEpochs
         if isLastEpoch:  # Calculate mAP
             is_coco = any([x in dataFilePath for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
-            results, mAPs = test.test(configFilePath, dataFilePath, batchSize=trainBatchSize, imgsz=testImgSize, model=ema.ema, dataloader=testDataLoader, multi_label=numCompletedBatches > burnInVal)
+            results, mAPs = test.test(configFilePath, dataFilePath, batchSize=trainBatchSize, imgsz=testImgSize, model=model, dataloader=testDataLoader, multi_label=numCompletedBatches > burnInVal)
 
         # Write
         with open(resultOutput, 'a') as f:
@@ -220,7 +215,7 @@ def train(trainHyperParams):
         # Save model
         if isLastEpoch:
             with open(resultOutput, 'r') as f:  # create checkpoint
-                ckpt = {'epoch': epoch, 'best_fitness': bestFitnessScore, 'training_results': f.read(), 'model': ema.ema.module.state_dict() if hasattr(model, 'module') else ema.ema.state_dict(), 'optimizer': None if isLastEpoch else optimizer.state_dict()}
+                ckpt = {'epoch': epoch, 'best_fitness': bestFitnessScore, 'training_results': f.read(), 'model': model.module.state_dict() if type(model) is nn.parallel.DistributedDataParallel else model.state_dict(), 'optimizer': None if isLastEpoch else optimizer.state_dict()}
 
             # Save last, best and delete
             torch.save(ckpt, last)
