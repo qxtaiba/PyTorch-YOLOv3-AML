@@ -34,7 +34,6 @@ trainHyperParams = {'giou': 3.54,  # giou loss gain
        'scale': 0.05 * 0,  # image scale (+/- gain)
        'shear': 0.641 * 0}  # image shear (+/- deg)
 
-
 def train(trainHyperParams):
 
     configFilePath = opt.cfg
@@ -51,6 +50,7 @@ def train(trainHyperParams):
     if minImgSize == maxImgSize:
         minImgSize //= 1.5
         maxImgSize //= 0.667
+
     minGridSize, maxGridSize = minImgSize // gridSize, maxImgSize // gridSize
     minImgSize, maxImgSize = int(minGridSize * gridSize), int(maxGridSize * gridSize)
     imgSize = maxImgSize  # initialize with max size
@@ -92,13 +92,6 @@ def train(trainHyperParams):
     # load weights darknet format
     # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
         load_darknet_weights(model, trainingWeights)
-
-    output_layer_indices = [idx - 1 for idx, module in enumerate(model.module_list) if isinstance(module, YOLOLayer)]
-    freeze_layer_indices = [x for x in range(len(model.module_list)) if (x not in output_layer_indices) and (x - 1 not in output_layer_indices)]
-    
-    for idx in freeze_layer_indices:
-        for parameter in model.module_list[idx].parameters():
-            parameter.requires_grad_(False)
 
     lf = lambda x: (((1 + math.cos(x * math.pi / numEpochs)) / 2) ** 1.0) * 0.95 + 0.05  # cosine
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
