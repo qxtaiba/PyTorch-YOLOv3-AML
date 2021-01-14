@@ -2,29 +2,6 @@ import torch.nn.functional as F
 
 from utils.utils import *
 
-
-def make_divisible(v, divisor):
-    # Function ensures all layers have a channel number that is divisible by 8
-    # https://github.com/tensorflow/models/blob/master/research/slim/nets/mobilenet/mobilenet.py
-    return math.ceil(v / divisor) * divisor
-
-
-class Flatten(nn.Module):
-    # Use after nn.AdaptiveAvgPool2d(1) to remove last 2 dimensions
-    def forward(self, x):
-        return x.view(x.size(0), -1)
-
-
-class Concat(nn.Module):
-    # Concatenate a list of tensors along dimension
-    def __init__(self, dimension=1):
-        super(Concat, self).__init__()
-        self.d = dimension
-
-    def forward(self, x):
-        return torch.cat(x, self.d)
-
-
 class FeatureConcat(nn.Module):
     def __init__(self, layers):
         super(FeatureConcat, self).__init__()
@@ -96,51 +73,9 @@ class MixConv2d(nn.Module):  # MixConv: Mixed Depthwise Convolutional Kernels ht
 
 
 # Activation functions below -------------------------------------------------------------------------------------------
-class SwishImplementation(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        ctx.save_for_backward(x)
-        return x * torch.sigmoid(x)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        x = ctx.saved_tensors[0]
-        sx = torch.sigmoid(x)  # sigmoid(ctx)
-        return grad_output * (sx * (1 + x * (1 - sx)))
-
-
-class MishImplementation(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        ctx.save_for_backward(x)
-        return x.mul(torch.tanh(F.softplus(x)))  # x * tanh(ln(1 + exp(x)))
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        x = ctx.saved_tensors[0]
-        sx = torch.sigmoid(x)
-        fx = F.softplus(x).tanh()
-        return grad_output * (fx + x * sx * (1 - fx * fx))
-
-
-class MemoryEfficientSwish(nn.Module):
-    def forward(self, x):
-        return SwishImplementation.apply(x)
-
-
-class MemoryEfficientMish(nn.Module):
-    def forward(self, x):
-        return MishImplementation.apply(x)
-
-
 class Swish(nn.Module):
     def forward(self, x):
         return x * torch.sigmoid(x)
-
-
-class HardSwish(nn.Module):  # https://arxiv.org/pdf/1905.02244.pdf
-    def forward(self, x):
-        return x * F.hardtanh(x + 3, 0., 6., True) / 6.
 
 
 class Mish(nn.Module):  # https://github.com/digantamisra98/Mish
