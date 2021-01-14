@@ -169,8 +169,8 @@ def train(trainHyperParams):
                 imgSize = random.randrange(minGridSize, maxGridSize + 1) * gridSize
             scaleFactor = imgSize / max(imgs.shape[2:])  # scale factor
             if scaleFactor != 1:
-                ns = [math.ceil(x * scaleFactor / gridSize) * gridSize for x in imgs.shape[2:]]  # new shape (stretched to 32-multiple)
-                imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
+                newShape = [math.ceil(x * scaleFactor / gridSize) * gridSize for x in imgs.shape[2:]]  # new shape (stretched to 32-multiple)
+                imgs = F.interpolate(imgs, size=newShape, mode='bilinear', align_corners=False)
 
             # Forward
             pred = model(imgs)
@@ -217,7 +217,7 @@ def train(trainHyperParams):
             is_coco = any([x in dataFilePath for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
             results, mAPs = test.test(configFilePath,
                                       dataFilePath,
-                                      batch_size=trainBatchSize,
+                                      batchSize=trainBatchSize,
                                       imgsz=testImgSize,
                                       model=ema.ema,
                                       save_json=isLastEpoch and is_coco,
@@ -257,7 +257,6 @@ def train(trainHyperParams):
     # end training
 
     plot_results()  # save as results.png
-    print('%g epochs completed in %.3f hours.\n' % (epoch - beginningEpoch + 1, (time.time() - beginningTime) / 3600))
     torch.cuda.empty_cache()
     return results
 
@@ -280,8 +279,6 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     
     opt.weights = last if opt.resume and not opt.weights else opt.weights
-    opt.cfg = check_file(opt.cfg)  # check file
-    opt.data = check_file(opt.data)  # check file
     print(opt)
     opt.img_size.extend([opt.img_size[-1]] * (3 - len(opt.img_size)))  # extend to 3 sizes (min, max, test)
     device = torch_utils.select_device(opt.device, apex=False, batch_size=opt.batch_size)

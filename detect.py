@@ -151,8 +151,6 @@ if __name__ == '__main__':
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     opt = parser.parse_args()
-    opt.cfg = check_file(opt.cfg)  # check file
-    opt.names = check_file(opt.names)  # check file
     print(opt)
 
     with torch.no_grad():
