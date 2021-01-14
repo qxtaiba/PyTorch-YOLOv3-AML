@@ -55,7 +55,6 @@ class LoadImages:  # for inference
         self.files = images 
         self.nF = nI 
         self.mode = 'images'
-        self.cap = None
 
     def __iter__(self):
         self.count = 0
@@ -78,13 +77,13 @@ class LoadImages:  # for inference
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
-        return path, img, img0, self.cap
+        return path, img, img0
 
     def __len__(self):
         return self.nF  # number of files
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
-    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False, cache_images=False, single_cls=False, pad=0.0):
+    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False, cache_images=False, pad=0.0):
         path = str(Path(path))  # os-agnostic
         parent = str(Path(path).parent) + os.sep
         if os.path.isfile(path):  # file

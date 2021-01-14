@@ -106,7 +106,7 @@ def train(trainHyperParams):
     scheduler.last_epoch = beginningEpoch - 1 
     
     # Dataset
-    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment=True, hyp=trainHyperParams, rect=opt.rect, cache_images=opt.cache_images, single_cls=False)
+    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment=True, hyp=trainHyperParams, rect=opt.rect, cache_images=opt.cache_images)
 
     # Dataloader
     trainBatchSize = min(trainBatchSize, len(dataset))
@@ -114,7 +114,7 @@ def train(trainHyperParams):
     dataLoader = torch.utils.data.DataLoader(dataset, trainBatchSize=trainBatchSize, num_workers=numWorkers, shuffle=not opt.rect,  pin_memory=True, collate_fn=dataset.collate_fn)
 
     # Testloader
-    testDataLoader = torch.utils.data.DataLoader(LoadImagesAndLabels(testingPath, testImgSize, trainBatchSize, hyp=trainHyperParams, rect=True, cache_images=opt.cache_images, single_cls=False), trainBatchSize=trainBatchSize, num_workers=numWorkers, pin_memory=True, collate_fn=dataset.collate_fn)
+    testDataLoader = torch.utils.data.DataLoader(LoadImagesAndLabels(testingPath, testImgSize, trainBatchSize, hyp=trainHyperParams, rect=True, cache_images=opt.cache_images), trainBatchSize=trainBatchSize, num_workers=numWorkers, pin_memory=True, collate_fn=dataset.collate_fn)
 
     # Model parameters
     model.nc = numClasses  # attach number of classes to model
@@ -220,8 +220,6 @@ def train(trainHyperParams):
                                       batchSize=trainBatchSize,
                                       imgsz=testImgSize,
                                       model=ema.ema,
-                                      save_json=isLastEpoch and is_coco,
-                                      single_cls=False,
                                       dataloader=testDataLoader,
                                       multi_label=numCompletedBatches > burnInVal)
 

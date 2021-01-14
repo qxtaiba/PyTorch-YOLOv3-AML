@@ -51,7 +51,7 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
 
     # Dataloader
     if dataloader is None:
-        dataset = LoadImagesAndLabels(testPath, imgsz, batchSize, rect=True, single_cls=False, pad=0.5)
+        dataset = LoadImagesAndLabels(testPath, imgsz, batchSize, rect=True, pad=0.5)
         batchSize = min(batchSize, len(dataset))
         dataloader = DataLoader(dataset, batchSize=batchSize, num_workers=min([os.cpu_count(), batchSize if batchSize > 1 else 0, 8]), pin_memory=True, collate_fn=dataset.collate_fn)
 
