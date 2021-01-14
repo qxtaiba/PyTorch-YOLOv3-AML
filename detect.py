@@ -29,10 +29,6 @@ def detect(save_img=False):
     # Eval mode
     model.to(device).eval()
 
-    # Fuse Conv2d + BatchNorm2d layers
-    # model.fuse()
-
-
 
     # Half precision
     half = half and device.type != 'cpu'  # half precision only supported on CUDA
@@ -72,9 +68,6 @@ def detect(save_img=False):
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,
                                    multi_label=False, classes=opt.classes, agnostic=opt.agnostic_nms)
 
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
 
         # Process detections
         for i, det in enumerate(pred):  # detections for image i
