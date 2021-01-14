@@ -11,7 +11,6 @@ import torch.nn.functional as F
 
 def init_seeds(seed=0):
     torch.manual_seed(seed)
-
     # Reduce randomness (may be slower on Tesla GPUs) # https://pytorch.org/docs/stable/notes/randomness.html
     if seed == 0:
         cudnn.deterministic = False
@@ -48,23 +47,6 @@ def select_device(device='', apex=False, batch_size=None):
 def time_synchronized():
     torch.cuda.synchronize() if torch.cuda.is_available() else None
     return time.time()
-
-
-def initialize_weights(model):
-    for m in model.modules():
-        t = type(m)
-        if t is nn.Conv2d:
-            pass  # nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-        elif t is nn.BatchNorm2d:
-            m.eps = 1e-4
-            m.momentum = 0.03
-        elif t in [nn.LeakyReLU, nn.ReLU, nn.ReLU6]:
-            m.inplace = True
-
-
-def find_modules(model, mclass=nn.Conv2d):
-    # finds layer indices matching module class 'mclass'
-    return [i for i, m in enumerate(model.module_list) if isinstance(m, mclass)]
 
 
 def fuse_conv_and_bn(conv, bn):
@@ -113,23 +95,6 @@ def model_info(model, verbose=False):
         fs = ''
 
     print('Model Summary: %g layers, %g parameters, %g gradients%s' % (len(list(model.parameters())), n_p, n_g, fs))
-
-
-def load_classifier(name='resnet101', n=2):
-    # Loads a pretrained model reshaped to n-class output
-    import pretrainedmodels  # https://github.com/Cadene/pretrained-models.pytorch#torchvision
-    model = pretrainedmodels.__dict__[name](num_classes=1000, pretrained='imagenet')
-
-    # Display model properties
-    for x in ['model.input_size', 'model.input_space', 'model.input_range', 'model.mean', 'model.std']:
-        print(x + ' =', eval(x))
-
-    # Reshape output to n classes
-    filters = model.last_linear.weight.shape[1]
-    model.last_linear.bias = torch.nn.Parameter(torch.zeros(n))
-    model.last_linear.weight = torch.nn.Parameter(torch.zeros(n, filters))
-    model.last_linear.out_features = n
-    return model
 
 
 def scale_img(img, ratio=1.0, same_shape=True):  # img(16,3,256,416), r=ratio
