@@ -3,7 +3,6 @@ import argparse
 import torch.distributed as dist
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
-from torch.utils.tensorboard import SummaryWriter
 
 import test  # import test.py to get mAP after each epoch
 from models import *
@@ -202,8 +201,6 @@ def train(trainHyperParams):
             if numCompletedBatches < 1:
                 f = 'train_batch%g.jpg' % batchIdx  # filename
                 res = plot_images(images=imgs, targets=targets, paths=paths, fname=f)
-                if tb_writer:
-                    tb_writer.add_image(f, res, dataformats='HWC', global_step=epoch)
 
             # end batch ------------------------------------------------------------------------------------------------
 
@@ -215,25 +212,12 @@ def train(trainHyperParams):
         isLastEpoch = epoch + 1 == numEpochs
         if isLastEpoch:  # Calculate mAP
             is_coco = any([x in dataFilePath for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
-            results, mAPs = test.test(configFilePath,
-                                      dataFilePath,
-                                      batchSize=trainBatchSize,
-                                      imgsz=testImgSize,
-                                      model=ema.ema,
-                                      dataloader=testDataLoader,
-                                      multi_label=numCompletedBatches > burnInVal)
+            results, mAPs = test.test(configFilePath, dataFilePath, batchSize=trainBatchSize, imgsz=testImgSize, model=ema.ema, dataloader=testDataLoader, multi_label=numCompletedBatches > burnInVal)
 
         # Write
         with open(resultOutput, 'a') as f:
             f.write(s + '%10.3g' * 7 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
 
-        # Tensorboard
-        if tb_writer:
-            tags = ['train/giou_loss', 'train/obj_loss', 'train/cls_loss',
-                    'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/F1',
-                    'val/giou_loss', 'val/obj_loss', 'val/cls_loss']
-            for x, tag in zip(list(meanLoss[:-1]) + list(results), tags):
-                tb_writer.add_scalar(tag, x, epoch)
 
         # Update best mAP
         fitnessScore = fitness(np.array(results).reshape(1, -1))  # fitness_i = weighted combination of [P, R, mAP, F1]
@@ -281,11 +265,5 @@ if __name__ == '__main__':
     opt.img_size.extend([opt.img_size[-1]] * (3 - len(opt.img_size)))  # extend to 3 sizes (min, max, test)
     device = torch_utils.select_device(opt.device, apex=False, batch_size=opt.batch_size)
 
-    # scale hyp['obj'] by img_size (evolved at 320)
-    # hyp['obj'] *= opt.img_size[0] / 320.
-
-    tb_writer = None
-    print('Start Tensorboard with "tensorboard --logdir=runs", view at http://localhost:6006/')
-    tb_writer = SummaryWriter(comment=opt.name)
     train(trainHyperParams)  # train normally
 
