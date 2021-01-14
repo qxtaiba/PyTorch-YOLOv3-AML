@@ -49,11 +49,11 @@ class LoadImages:  # for inference
 
         images = [x for x in files if os.path.splitext(x)[-1].lower() in img_formats]
 
-        nI = len(images)
+        numImages = len(images)
 
-        self.img_size = img_size
+        self.imgSize = img_size
         self.files = images 
-        self.nF = nI 
+        self.numFiles = numImages 
         self.mode = 'images'
 
     def __iter__(self):
@@ -61,17 +61,16 @@ class LoadImages:  # for inference
         return self
 
     def __next__(self):
-        if self.count == self.nF:
+        if self.count == self.numFiles:
             raise StopIteration
         path = self.files[self.count]
 
         # Read image
         self.count += 1
         img0 = cv2.imread(path)  # BGR
-        print('image %g/%g %s: ' % (self.count, self.nF, path), end='')
 
         # Padded resize
-        img = letterbox(img0, new_shape=self.img_size)[0]
+        img = letterbox(img0, new_shape=self.imgSize)[0]
 
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
@@ -80,10 +79,10 @@ class LoadImages:  # for inference
         return path, img, img0
 
     def __len__(self):
-        return self.nF  # number of files
+        return self.numFiles  # number of files
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
-    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False, cache_images=False, pad=0.0):
+    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, cache_images=False, pad=0.0):
         path = str(Path(path))  # os-agnostic
         parent = str(Path(path).parent) + os.sep
         if os.path.isfile(path):  # file
@@ -93,24 +92,23 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         elif os.path.isdir(path):  # folder
             f = glob.iglob(path + os.sep + '*.*')
 
-        self.img_files = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in img_formats]
+        self.imgFiles = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in img_formats]
 
-        n = len(self.img_files)
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
-        nb = bi[-1] + 1  # number of batches
+        n = len(self.imgFiles)
+        batchIdx = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        numBatches = batchIdx[-1] + 1  # number of batches
 
-        self.n = n  # number of images
-        self.batch = bi  # batch index of image
+        self.numImages = n  # number of images
+        self.batch = batchIdx  # batch index of image
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
-        self.image_weights = image_weights
-        self.rect = False if image_weights else rect
+        self.rect = rect
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
 
         # Define labels
         self.label_files = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt')
-                            for x in self.img_files]
+                            for x in self.imgFiles]
 
         # Read image shapes (wh)
         sp = path.replace('.txt', '') + '.shapes'  # shapefile path
@@ -119,26 +117,25 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             with open(sp, 'r') as f:  # read existing shapefile
                 s = [x.split() for x in f.read().splitlines()]
         except:
-            s = [exif_size(Image.open(f)) for f in tqdm(self.img_files, desc='Reading image shapes')]
+            s = [exif_size(Image.open(f)) for f in tqdm(self.imgFiles, desc='Reading image shapes')]
             np.savetxt(sp, s, fmt='%g')  # overwrites existing (if any)
 
         self.shapes = np.array(s, dtype=np.float64)
 
-        # Rectangular Training  https://github.com/ultralytics/yolov3/issues/232
         if self.rect:
             # Sort by aspect ratio
             s = self.shapes  # wh
             ar = s[:, 1] / s[:, 0]  # aspect ratio
             irect = ar.argsort()
-            self.img_files = [self.img_files[i] for i in irect]
+            self.imgFiles = [self.imgFiles[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
             self.shapes = s[irect]  # wh
             ar = ar[irect]
 
             # Set training image shapes
-            shapes = [[1, 1]] * nb
-            for i in range(nb):
-                ari = ar[bi == i]
+            shapes = [[1, 1]] * numBatches
+            for i in range(numBatches):
+                ari = ar[batchIdx == i]
                 mini, maxi = ari.min(), ari.max()
                 if maxi < 1:
                     shapes[i] = [maxi, 1]
@@ -151,7 +148,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.imgs = [None] * n
         self.labels = [np.zeros((0, 5), dtype=np.float32)] * n
         labels_loaded = False
-        nm, nf, ne, ns, nd = 0, 0, 0, 0, 0  # number missing, found, empty, datasubset, duplicate
+        numMissingLabels, numFoundLabels, numEmptyLabels, numDuplicateLabels = 0, 0, 0, 0
         np_labels_path = str(Path(self.label_files[0]).parent) + '.npy'  # saved labels in *.npy file
         if os.path.isfile(np_labels_path):
             s = np_labels_path  # print string
@@ -171,31 +168,31 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     with open(file, 'r') as f:
                         l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
                 except:
-                    nm += 1  # print('missing labels for image %s' % self.img_files[i])  # file missing
+                    numMissingLabels += 1  
                     continue
 
             if l.shape[0]:
                 assert l.shape[1] == 5, '> 5 label columns: %s' % file
                 assert (l >= 0).all(), 'negative labels: %s' % file
                 assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
-                if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
-                    nd += 1  # print('WARNING: duplicate rows in %s' % self.label_files[i])  # duplicate rows
+                if np.unique(l, axis=0).shape[0] < l.shape[0]:
+                    numDuplicateLabels += 1
 
                 self.labels[i] = l
-                nf += 1  # file found
+                numFoundLabels += 1
 
             else:
-                ne += 1  # print('empty labels for image %s' % self.img_files[i])  # file empty
+                numEmptyLabels += 1
 
             pbar.desc = 'Caching labels %s (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (
-                s, nf, nm, ne, nd, n)
+                s, numFoundLabels, numMissingLabels, numEmptyLabels, numDuplicateLabels, n)
 
 
     def __len__(self):
-        return len(self.img_files)
+        return len(self.imgFiles)
 
     def __getitem__(self, index):
-        if self.image_weights:
+        if self.imgWeights:
             index = self.indices[index]
 
         hyp = self.hyp
@@ -272,7 +269,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
-        return torch.from_numpy(img), labels_out, self.img_files[index], shapes
+        return torch.from_numpy(img), labels_out, self.imgFiles[index], shapes
 
     @staticmethod
     def collate_fn(batch):
@@ -455,8 +452,3 @@ def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10,
 
     return img, targets
 
-def create_folder(path='./new_folder'):
-    # Create folder
-    if os.path.exists(path):
-        shutil.rmtree(path)  # delete output folder
-    os.makedirs(path)  # make new output folder

@@ -98,12 +98,12 @@ def train(trainHyperParams):
     scheduler.last_epoch = beginningEpoch - 1 
     
     # Dataset
-    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment=True, hyp=trainHyperParams, rect=opt.rect, cache_images=opt.cache_images)
+    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment=True, hyp=trainHyperParams, rect=False, cache_images=opt.cache_images)
 
     # Dataloader
     trainBatchSize = min(trainBatchSize, len(dataset))
     numWorkers = min([os.cpu_count(), trainBatchSize if trainBatchSize > 1 else 0, 8])  # number of workers
-    dataLoader = torch.utils.data.DataLoader(dataset, trainBatchSize=trainBatchSize, num_workers=numWorkers, shuffle=not opt.rect,  pin_memory=True, collate_fn=dataset.collate_fn)
+    dataLoader = torch.utils.data.DataLoader(dataset, trainBatchSize=trainBatchSize, num_workers=numWorkers, shuffle=True,  pin_memory=True, collate_fn=dataset.collate_fn)
 
     # Testloader
     testDataLoader = torch.utils.data.DataLoader(LoadImagesAndLabels(testingPath, testImgSize, trainBatchSize, hyp=trainHyperParams, rect=True, cache_images=opt.cache_images), trainBatchSize=trainBatchSize, num_workers=numWorkers, pin_memory=True, collate_fn=dataset.collate_fn)
@@ -123,12 +123,6 @@ def train(trainHyperParams):
 
     for epoch in range(beginningEpoch, numEpochs):
         model.train()
-
-        # Update image weights (optional)
-        if dataset.image_weights:
-            classWeights = model.class_weights.cpu().numpy() * (1 - mAPs) ** 2  
-            image_weights = labels_to_image_weights(dataset.labels, nc=numClasses, class_weights=classWeights)
-            dataset.indices = random.choices(range(dataset.n), weights=image_weights, k=dataset.n)  # rand weighted idx
 
         meanLoss = torch.zeros(4).to(device)  # mean losses
         
@@ -239,7 +233,6 @@ if __name__ == '__main__':
     parser.add_argument('--data', type=str, default='data/coco2017.data', help='*.data path')
     parser.add_argument('--multi-scale', action='store_true', help='adjust (67%% - 150%%) img_size every 10 batches')
     parser.add_argument('--img-size', nargs='+', type=int, default=[320, 640], help='[min_train, max-train, test]')
-    parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
     parser.add_argument('--cache-images', action='store_false', help='cache images for faster training')
     parser.add_argument('--weights', type=str, default='weights/yolov3-spp-ultralytics.pt', help='initial weights path')
