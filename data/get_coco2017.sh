@@ -11,7 +11,7 @@ curl -Lb ./cookie "https://drive.google.com/uc?export=download&confirm=$(awk '/d
 rm ./cookie
 
 # Unzip labels
-unzip -q ${filename} # for coco.zip
+unzip -q  ${filename} # for coco.zip
 # tar -xzf ${filename} # for coco.tar.gz
 rm ${filename}
 
