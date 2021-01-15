@@ -21,15 +21,15 @@ from tqdm import tqdm
 from . import torch_utils  
 
 # Set printoptions
-torch.set_printoptions(linewidth=320, precision=5, profile='long')
-np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
+torch.set_printoptions(linewidth = 320, precision = 5, profile ='long')
+np.set_printoptions(linewidth = 320, formatter ={'float_kind': '{:11.5g}'.format})  # format short g, %precision = 5
 matplotlib.rc('font', **{'size': 11})
 
 # Prevent OpenCV from multithreading (to use PyTorch DataLoader)
 cv2.setNumThreads(0)
 
 def xyxy2xywh(x):
-    # Convert boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
+    # Convert boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1 = top-left, xy2 = bottom-right
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
     y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
     y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
@@ -39,7 +39,7 @@ def xyxy2xywh(x):
 
 
 def xywh2xyxy(x):
-    # Convert boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
+    # Convert boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1 = top-left, xy2 = bottom-right
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
     y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
     y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
@@ -48,7 +48,7 @@ def xywh2xyxy(x):
     return y
 
 
-def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
+def scale_coords(img1_shape, coords, img0_shape, ratio_pad = None):
     # Rescale coords (xyxy) from img1_shape to img0_shape
     if ratio_pad is None:  # calculate from img0_shape
         gain = max(img1_shape) / max(img0_shape)  # gain  = old / new
@@ -118,14 +118,14 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
                 ap[ci, j] = compute_ap(recall[:, j], precision[:, j])
 
             # Plot
-            # fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+            # fig, ax = plt.subplots(1, 1, figsize =(5, 5))
             # ax.plot(recall, precision)
             # ax.set_xlabel('Recall')
             # ax.set_ylabel('Precision')
             # ax.set_xlim(0, 1.01)
             # ax.set_ylim(0, 1.01)
             # fig.tight_layout()
-            # fig.savefig('PR_curve.png', dpi=300)
+            # fig.savefig('PR_curve.png', dpi = 300)
 
     # Compute F1 score (harmonic mean of precision and recall)
     f1 = 2 * p * r / (p + r + 1e-16)
@@ -162,7 +162,7 @@ def compute_ap(recall, precision):
     return ap
 
 
-def bbox_iou(firstBox, secondBox, x1y1x2y2=True, GIoU=False):
+def bbox_iou(firstBox, secondBox, x1y1x2y2 = True, GIoU = False):
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
     secondBox = secondBox.t()
 
@@ -217,12 +217,8 @@ def box_iou(box1, box2):
             IoU values for every element in boxes1 and boxes2
     """
 
-    def box_area(box):
-        # box = 4xn
-        return (box[2] - box[0]) * (box[3] - box[1])
-
-    area1 = box_area(box1.t())
-    area2 = box_area(box2.t())
+    area1 = (box1.t()[2] - box1.t()[0]) * (box1.t()[3] - box1.t()[1])
+    area2 = (box2.t()[2] - box2.t()[0]) * (box2.t()[3] - box2.t()[1])
 
     # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
     inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
@@ -241,11 +237,10 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     FloatTensor = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
     classLoss, boxLoss, objectLoss = FloatTensor([0]), FloatTensor([0]), FloatTensor([0])
     tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
-    red = 'mean'  # Loss reduction (sum or mean)
 
     # Define criteria
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=FloatTensor([model.hyp['cls_pw']]), reduction=red)
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=FloatTensor([model.hyp['obj_pw']]), reduction=red)
+    BCEcls = nn.BCEWithLogitsLoss(pos_weight = FloatTensor([model.hyp['cls_pw']]), reduction = 'mean')
+    BCEobj = nn.BCEWithLogitsLoss(pos_weight = FloatTensor([model.hyp['obj_pw']]), reduction = 'mean')
 
     # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
     cp, cn = 1.0 - 0.5 * 0.0, 0.5 * 0.0
@@ -263,9 +258,9 @@ def compute_loss(p, targets, model):  # predictions, targets, model
 
             # GIoU
             pxy = predictionSubset[:, :2].sigmoid()
-            pwh = predictionSubset[:, 2:4].exp().clamp(max=1E3) * anchors[layerIdx]
+            pwh = predictionSubset[:, 2:4].exp().clamp(max = 1E3) * anchors[layerIdx]
             pbox = torch.cat((pxy, pwh), 1)  # predicted box
-            giou = bbox_iou(pbox.t(), tbox[layerIdx], x1y1x2y2=False, GIoU=True)  # giou(prediction, target)
+            giou = bbox_iou(pbox.t(), tbox[layerIdx], x1y1x2y2 = False, GIoU = True)  # giou(prediction, target)
             boxLoss += (1.0 - giou).mean()  # giou loss
 
             # Obj
@@ -291,7 +286,7 @@ def build_targets(p, targets, model):
     # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
     numTargets = targets.shape[0]
     tcls, tbox, indices, anch = [], [], [], []
-    gain = torch.ones(6, device=targets.device)  # normalized to gridspace gain
+    gain = torch.ones(6, device = targets.device)  # normalized to gridspace gain
 
     for idx, layer in enumerate(model.yolo_layers):
         anchors = model.module_list[layer].anchor_vec
@@ -309,7 +304,6 @@ def build_targets(p, targets, model):
 
             # overlaps
             gxy = t[:, 2:4]  # grid xy
-            z = torch.zeros_like(gxy)
 
        # Define
         b, c = t[:, :2].long().T  # image, class
@@ -327,7 +321,7 @@ def build_targets(p, targets, model):
     return tcls, tbox, indices, anch
 
 
-def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=True, classes=None, agnostic=False):
+def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_label = True, classes = None, agnostic = False):
     """
     Performs  Non-Maximum Suppression on inference results
     Returns detections with shape:
@@ -364,7 +358,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
 
         # Filter by class
         if classes:
-            x = x[(j.view(-1, 1) == torch.tensor(classes, device=j.device)).any(1)]
+            x = x[(j.view(-1, 1) == torch.tensor(classes, device = j.device)).any(1)]
 
         # Apply finite constraint
         # if not torch.isfinite(x).all():
@@ -376,7 +370,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
             continue
 
         # Sort by confidence
-        # x = x[x[:, 4].argsort(descending=True)]
+        # x = x[x[:, 4].argsort(descending = True)]
 
         # Batched NMS
         c = x[:, 5] * 0 if agnostic else x[:, 5]  # classes
@@ -386,7 +380,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
             try:  # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
                 iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
                 weights = iou * scores[None]  # box weights
-                x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes
+                x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim = True)  # merged boxes
                 # i = i[iou.sum(1) > 1]  # require redundancy
             except:  # possible CUDA error https://github.com/ultralytics/yolov3/issues/1139
                 print(x, i, x.shape, i.shape)
@@ -424,21 +418,21 @@ def output_to_target(output, width, height):
 
 
 # Plotting functions ---------------------------------------------------------------------------------------------------
-def plot_one_box(x, img, color=None, label=None, line_thickness=None):
+def plot_one_box(x, img, color = None, label = None, line_thickness = None):
     # Plots one bounding box on image img
     tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
     color = color or [random.randint(0, 255) for _ in range(3)]
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    cv2.rectangle(img, c1, c2, color, thickness = tl, lineType = cv2.LINE_AA)
     if label:
         tf = max(tl - 1, 1)  # font thickness
-        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        t_size = cv2.getTextSize(label, 0, fontScale = tl / 3, thickness = tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
         cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
-        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
+        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness = tf, lineType = cv2.LINE_AA)
 
 
-def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16):
+def plot_images(images, targets, paths = None, fname ='images.jpg', names = None, max_size = 640, max_subplots = 16):
     tl = 3  # line thickness
     tf = max(tl - 1, 1)  # font thickness
     if os.path.isfile(fname):  # do not overwrite
@@ -465,7 +459,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         w = math.ceil(scale_factor * w)
 
     # Empty array for output
-    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)
+    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype = np.uint8)
 
     # Fix class - colour map
     prop_cycle = plt.rcParams['axes.prop_cycle']
@@ -502,27 +496,27 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 cls = names[cls] if names else cls
                 if gt or conf[j] > 0.3:  # 0.3 conf thresh
                     label = '%s' % cls if gt else '%s %.1f' % (cls, conf[j])
-                    plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl)
+                    plot_one_box(box, mosaic, label = label, color = color, line_thickness = tl)
 
         # Draw image filename labels
         if paths is not None:
             label = os.path.basename(paths[i])[:40]  # trim to 40 char
-            t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
-            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
-                        lineType=cv2.LINE_AA)
+            t_size = cv2.getTextSize(label, 0, fontScale = tl / 3, thickness = tf)[0]
+            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness = tf,
+                        lineType = cv2.LINE_AA)
 
         # Image border
-        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
+        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness = 3)
 
     if fname is not None:
-        mosaic = cv2.resize(mosaic, (int(ns * w * 0.5), int(ns * h * 0.5)), interpolation=cv2.INTER_AREA)
+        mosaic = cv2.resize(mosaic, (int(ns * w * 0.5), int(ns * h * 0.5)), interpolation = cv2.INTER_AREA)
         cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))
 
     return mosaic
 
-def plot_results(start=0, stop=0, bucket='', id=()):  # from utils.utils import *; plot_results()
+def plot_results(start = 0, stop = 0, bucket ='', id =()):  # from utils.utils import *; plot_results()
     # Plot training 'results*.txt' as seen in https://github.com/ultralytics/yolov3#training
-    fig, ax = plt.subplots(2, 5, figsize=(12, 6), tight_layout=True)
+    fig, ax = plt.subplots(2, 5, figsize =(12, 6), tight_layout = True)
     ax = ax.ravel()
     s = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall',
          'val GIoU', 'val Objectness', 'val Classification', 'mAP@0.5', 'F1']
@@ -530,7 +524,7 @@ def plot_results(start=0, stop=0, bucket='', id=()):  # from utils.utils import 
     files = glob.glob('results*.txt') + glob.glob('../../Downloads/results*.txt')
     for f in sorted(files):
         try:
-            results = np.loadtxt(f, usecols=[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin=2).T
+            results = np.loadtxt(f, usecols =[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin = 2).T
             n = results.shape[1]  # number of rows
             x = range(start, min(stop, n) if stop else n)
             for i in range(10):
@@ -538,7 +532,7 @@ def plot_results(start=0, stop=0, bucket='', id=()):  # from utils.utils import 
                 if i in [0, 1, 2, 5, 6, 7]:
                     y[y == 0] = np.nan  # dont show zero loss values
                     # y /= y[0]  # normalize
-                ax[i].plot(x, y, marker='.', label=Path(f).stem, linewidth=2, markersize=8)
+                ax[i].plot(x, y, marker ='.', label = Path(f).stem, linewidth = 2, markersize = 8)
                 ax[i].set_title(s[i])
                 # if i in [5, 6, 7]:  # share train and val loss y axes
                 #     ax[i].get_shared_y_axes().join(ax[i], ax[i - 5])
@@ -546,4 +540,4 @@ def plot_results(start=0, stop=0, bucket='', id=()):  # from utils.utils import 
             print('Warning: Plotting error for %s, skipping file' % f)
 
     ax[1].legend()
-    fig.savefig('results.png', dpi=200)
+    fig.savefig('results.png', dpi = 200)

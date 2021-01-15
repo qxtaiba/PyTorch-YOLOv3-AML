@@ -15,10 +15,10 @@ def fuse_conv_and_bn(conv, bn):
         # init
         fusedconv = torch.nn.Conv2d(conv.in_channels,
                                     conv.out_channels,
-                                    kernel_size=conv.kernel_size,
-                                    stride=conv.stride,
-                                    padding=conv.padding,
-                                    bias=True)
+                                    kernel_size = conv.kernel_size,
+                                    stride = conv.stride,
+                                    padding = conv.padding,
+                                    bias = True)
 
         # prepare filters
         w_conv = conv.weight.clone().view(conv.out_channels, -1)
@@ -35,12 +35,12 @@ def fuse_conv_and_bn(conv, bn):
 
         return fusedconv
 
-def scale_img(img, ratio=1.0, same_shape=True):  # img(16,3,256,416), r=ratio
+def scale_img(img, ratio = 1.0, same_shape = True):  # img(16,3,256,416), r = ratio
     # scales img(bs,3,y,x) by ratio
     h, w = img.shape[2:]
     s = (int(h * ratio), int(w * ratio))  # new size
-    img = F.interpolate(img, size=s, mode='bilinear', align_corners=False)  # resize
+    img = F.interpolate(img, size = s, mode ='bilinear', align_corners = False)  # resize
     if not same_shape:  # pad/crop img
         gs = 64  # (pixels) grid size
         h, w = [math.ceil(x * ratio / gs) * gs for x in (h, w)]
-    return F.pad(img, [0, w - s[1], 0, h - s[0]], value=0.447)  # value = imagenet mean
+    return F.pad(img, [0, w - s[1], 0, h - s[0]], value = 0.447)  # value = imagenet mean

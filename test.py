@@ -8,7 +8,7 @@ from utils.datasets import *
 from utils.utils import *
 
 
-def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=0.001, iouThreshold=0.6, augment=False, model=None, dataloader=None, multi_label=True):
+def test(cfg,data, weights = None, batchSize = 16, imgSize = 416, confidenceThreshold = 0.001, iouThreshold = 0.6, augment = False, model = None, dataloader = None, multi_label = True):
     
     # Initialize/load model and set device
     if model is None:
@@ -24,7 +24,7 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
         model = Darknet(cfg, imgSize)
 
         # Load weights
-        model.load_state_dict(torch.load(weights, map_location=device)['model'])
+        model.load_state_dict(torch.load(weights, map_location = device)['model'])
 
         # Fuse
         model.fuse()
@@ -52,19 +52,19 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
 
     # Dataloader
     if dataloader is None:
-        dataset = LoadImagesAndLabels(testPath, imgSize, batchSize, rect=True, pad=0.5)
+        dataset = LoadImagesAndLabels(testPath, imgSize, batchSize, rect = True, pad = 0.5)
         batchSize = min(batchSize, len(dataset))
-        dataloader = DataLoader(dataset, batchSize=batchSize, num_workers=min([os.cpu_count(), batchSize if batchSize > 1 else 0, 8]), pin_memory=True, collate_fn=dataset.collate_fn)
+        dataloader = DataLoader(dataset, batchSize = batchSize, num_workers = min([os.cpu_count(), batchSize if batchSize > 1 else 0, 8]), pin_memory = True, collate_fn = dataset.collate_fn)
 
     seen = 0
     model.eval()
-    _ = model(torch.zeros((1, 3, imgSize, imgSize), device=device)) if device.type != 'cpu' else None  # run once
+    _ = model(torch.zeros((1, 3, imgSize, imgSize), device = device)) if device.type != 'cpu' else None  # run once
     s = ('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1')
     precision, recall, F1, meanPrecision, meanRecall, mAP, meanF1 = 0., 0., 0., 0., 0., 0., 0.
-    loss = torch.zeros(3, device=device)
+    loss = torch.zeros(3, device = device)
     testStatistics, AP, APClass = [], [], []
 
-    for batchIdx, (imgs, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+    for batchIdx, (imgs, targets, paths, shapes) in enumerate(tqdm(dataloader, desc = s)):
         imgs = imgs.to(device).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         numBatches, channels, height, width = imgs.shape  # batch size, channels, height, width
@@ -73,14 +73,14 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
         # Disable gradients
         with torch.no_grad():
             # Run model
-            inferenceOutput, trainingOutput = model(imgs, augment=augment)  # inference and training outputs
+            inferenceOutput, trainingOutput = model(imgs, augment = augment)  # inference and training outputs
 
             # Compute loss
             if isTraining:  # if model has loss hyperparameters
                 loss += compute_loss(trainingOutput, targets, model)[1][:3]  # GIoU, obj, cls
 
             # Run NMS
-            output = non_max_suppression(inferenceOutput, conf_thres=confidenceThreshold, iou_thres=iouThreshold, multi_label=multi_label)
+            output = non_max_suppression(inferenceOutput, conf_thres = confidenceThreshold, iou_thres = iouThreshold, multi_label = multi_label)
 
         # Statistics per image
         for statIdx, pred in enumerate(output):
@@ -91,7 +91,7 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
 
             if pred is None:
                 if numLabels:
-                    testStatistics.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), targetClass))
+                    testStatistics.append((torch.zeros(0, niou, dtype = torch.bool), torch.Tensor(), torch.Tensor(), targetClass))
                 continue
 
 
@@ -103,7 +103,7 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
             pred[:, 3].clamp_(0, height)  # y2
 
             # Assign all predictions as incorrect
-            correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
+            correct = torch.zeros(pred.shape[0], niou, dtype = torch.bool, device = device)
             if numLabels:
                 detected = []  # target indices
                 targetClassTensor = labels[:, 0]
@@ -136,9 +136,9 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
         # Plot images
         if batchIdx < 1:
             f = 'test_batch%g_gt.jpg' % batchIdx  # filename
-            plot_images(imgs, targets, paths=paths, names=classNames, fname=f)  # ground truth
+            plot_images(imgs, targets, paths = paths, names = classNames, fname = f)  # ground truth
             f = 'test_batch%g_pred.jpg' % batchIdx
-            plot_images(imgs, output_to_target(output, width, height), paths=paths, names=classNames, fname=f)  # predictions
+            plot_images(imgs, output_to_target(output, width, height), paths = paths, names = classNames, fname = f)  # predictions
 
     # Compute statistics
     testStatistics = [np.concatenate(x, 0) for x in zip(*testStatistics)]  # to numpy
@@ -147,7 +147,7 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
         if niou > 1:
             precision, recall, AP, F1 = precision[:, 0], recall[:, 0], AP.mean(1), AP[:, 0]  # [P, R, AP@0.5:0.95, AP@0.5]
         meanPrecision, meanRecall, mAP, meanF1 = precision.mean(), recall.mean(), AP.mean(), F1.mean()
-        numTargets = np.bincount(testStatistics[3].astype(np.int64), minlength=numClasses)  # number of targets per class
+        numTargets = np.bincount(testStatistics[3].astype(np.int64), minlength = numClasses)  # number of targets per class
     else:
         numTargets = torch.zeros(1)
 
@@ -169,16 +169,16 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog='test.py')
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='*.cfg path')
-    parser.add_argument('--data', type=str, default='data/coco2014.data', help='*.data path')
-    parser.add_argument('--weights', type=str, default='weights/yolov3-spp-ultralytics.pt', help='weights path')
-    parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
-    parser.add_argument('--img-size', type=int, default=512, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
-    parser.add_argument('--augment', action='store_true', help='augmented inference')
+    parser = argparse.ArgumentParser(prog ='test.py')
+    parser.add_argument('--cfg', type = str, default ='cfg/yolov3-spp.cfg', help ='*.cfg path')
+    parser.add_argument('--data', type = str, default ='data/coco2014.data', help ='*.data path')
+    parser.add_argument('--weights', type = str, default ='weights/yolov3-spp-ultralytics.pt', help ='weights path')
+    parser.add_argument('--batch-size', type = int, default = 16, help ='size of each image batch')
+    parser.add_argument('--img-size', type = int, default = 512, help ='inference size (pixels)')
+    parser.add_argument('--conf-thres', type = float, default = 0.001, help ='object confidence threshold')
+    parser.add_argument('--iou-thres', type = float, default = 0.6, help ='IOU threshold for NMS')
+    parser.add_argument('--device', default ='', help ='device id (i.e. 0 or 0,1) or cpu')
+    parser.add_argument('--augment', action ='store_true', help ='augmented inference')
     opt = parser.parse_args()
 
     # task = 'test', 'study', 'benchmark'

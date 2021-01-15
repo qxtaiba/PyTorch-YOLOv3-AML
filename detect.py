@@ -21,13 +21,13 @@ def detect():
     model = Darknet(opt.cfg, imgsz)
 
     # Load weights
-    model.load_state_dict(torch.load(weights, map_location=device)['model'])
+    model.load_state_dict(torch.load(weights, map_location = device)['model'])
 
     # Eval mode
     model.to(device).eval()
 
     # Set Dataloader
-    dataset = LoadImages(source, img_size=imgsz)
+    dataset = LoadImages(source, img_size = imgsz)
 
     # Get names and colors
     with open(opt.names, 'r') as f:
@@ -37,7 +37,7 @@ def detect():
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
     # Run inference
-    img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
+    img = torch.zeros((1, 3, imgsz, imgsz), device = device)  # init img
     _ = model(img.float()) 
     for path, img, im0s in dataset:
         img = torch.from_numpy(img).to(device)
@@ -47,10 +47,10 @@ def detect():
             img = img.unsqueeze(0)
 
         # Inference
-        pred = model(img, augment=opt.augment)[0]
+        pred = model(img, augment = opt.augment)[0]
 
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, multi_label=False, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, multi_label = False, classes = opt.classes, agnostic = opt.agnostic_nms)
 
         # Process detections
         for idx, detections in enumerate(pred):  # detections for image i
@@ -72,7 +72,7 @@ def detect():
                 for *xyxy, conf, cls in reversed(detections):
                     # Add bbox to image
                     label = '%s %.2f' % (names[int(cls)], conf)
-                    plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
+                    plot_one_box(xyxy, im0, label = label, color = colors[int(cls)])
 
             # Stream results
             cv2.imshow(p, im0)
@@ -82,18 +82,18 @@ def detect():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='*.cfg path')
-    parser.add_argument('--names', type=str, default='data/coco.names', help='*.names path')
-    parser.add_argument('--weights', type=str, default='weights/yolov3-spp-ultralytics.pt', help='weights path')
-    parser.add_argument('--source', type=str, default='data/samples', help='source')  # input file/folder, 0 for webcam
-    parser.add_argument('--output', type=str, default='output', help='output folder')  # output folder
-    parser.add_argument('--img-size', type=int, default=512, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
-    parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
-    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
-    parser.add_argument('--augment', action='store_true', help='augmented inference')
+    parser.add_argument('--cfg', type = str, default ='cfg/yolov3-spp.cfg', help ='*.cfg path')
+    parser.add_argument('--names', type = str, default ='data/coco.names', help ='*.names path')
+    parser.add_argument('--weights', type = str, default ='weights/yolov3-spp-ultralytics.pt', help ='weights path')
+    parser.add_argument('--source', type = str, default ='data/samples', help ='source')  # input file/folder, 0 for webcam
+    parser.add_argument('--output', type = str, default ='output', help ='output folder')  # output folder
+    parser.add_argument('--img-size', type = int, default = 512, help ='inference size (pixels)')
+    parser.add_argument('--conf-thres', type = float, default = 0.3, help ='object confidence threshold')
+    parser.add_argument('--iou-thres', type = float, default = 0.6, help ='IOU threshold for NMS')
+    parser.add_argument('--device', default ='', help ='device id (i.e. 0 or 0,1) or cpu')
+    parser.add_argument('--classes', nargs ='+', type = int, help ='filter by class')
+    parser.add_argument('--agnostic-nms', action ='store_true', help ='class-agnostic NMS')
+    parser.add_argument('--augment', action ='store_true', help ='augmented inference')
     opt = parser.parse_args()
     print(opt)
 

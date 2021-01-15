@@ -18,14 +18,14 @@ resultOutput = 'results.txt'
 trainHyperParams = {'giou': 3.54,  # giou loss gain
        'cls': 37.4,  # cls loss gain
        'cls_pw': 1.0,  # cls BCELoss positive_weight
-       'obj': 64.3,  # obj loss gain (*=img_size/320 if img_size != 320)
+       'obj': 64.3,  # obj loss gain (*= img_size/320 if img_size != 320)
        'obj_pw': 1.0,  # obj BCELoss positive_weight
        'iou_t': 0.20,  # iou training threshold
-       'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
+       'lr0': 0.01,  # initial learning rate (SGD = 5E-3, Adam = 5E-4)
        'lrf': 0.0005,  # final learning rate (with cos scheduler)
        'momentum': 0.937,  # SGD momentum
        'weight_decay': 0.0005,  # optimizer weight decay
-       'fl_gamma': 0.0,  # focal loss gamma (efficientDet default is gamma=1.5)
+       'fl_gamma': 0.0,  # focal loss gamma (efficientDet default is gamma = 1.5)
        'hsv_h': 0.0138,  # image HSV-Hue augmentation (fraction)
        'hsv_s': 0.678,  # image HSV-Saturation augmentation (fraction)
        'hsv_v': 0.36,  # image HSV-Value augmentation (fraction)
@@ -58,7 +58,7 @@ def train(trainHyperParams):
     seed = 0
     random.seed(seed)
     np.random.seed(seed)
-    torch_utils.init_seeds(seed=seed)
+    torch_utils.init_seeds(seed = seed)
     torch.manual_seed(seed)
     # Reduce randomness 
     if seed == 0:
@@ -88,7 +88,7 @@ def train(trainHyperParams):
         else:
             paramGroupZero += [value]  # all else
 
-    optimizer = optim.Adam(paramGroupZero, lr=trainHyperParams['lr0'])
+    optimizer = optim.Adam(paramGroupZero, lr = trainHyperParams['lr0'])
     optimizer.add_param_group({'params': paramGroupOne, 'weight_decay': trainHyperParams['weight_decay']})  # add pg1 with weight_decay
     optimizer.add_param_group({'params': paramGroupTwo})  # add pg2 (biases)
     del paramGroupZero, paramGroupOne, paramGroupTwo
@@ -97,19 +97,19 @@ def train(trainHyperParams):
     bestFitnessScore = 0.0
     
     lf = lambda x: (((1 + math.cos(x * math.pi / numEpochs)) / 2) ** 1.0) * 0.95 + 0.05  # cosine
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda = lf)
     scheduler.last_epoch = beginningEpoch - 1 
     
     # Dataset
-    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment=True, hyp=trainHyperParams, rect=False, cache_images=opt.cache_images)
+    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment = True, hyp = trainHyperParams, rect = False, cache_images = opt.cache_images)
 
     # Dataloader
     trainBatchSize = min(trainBatchSize, len(dataset))
     numWorkers = min([os.cpu_count(), trainBatchSize if trainBatchSize > 1 else 0, 8])  # number of workers
-    dataLoader = torch.utils.data.DataLoader(dataset, trainBatchSize=trainBatchSize, num_workers=numWorkers, shuffle=True,  pin_memory=True, collate_fn=dataset.collate_fn)
+    dataLoader = torch.utils.data.DataLoader(dataset, trainBatchSize = trainBatchSize, num_workers = numWorkers, shuffle = True,  pin_memory = True, collate_fn = dataset.collate_fn)
 
     # Testloader
-    testDataLoader = torch.utils.data.DataLoader(LoadImagesAndLabels(testingPath, testImgSize, trainBatchSize, hyp=trainHyperParams, rect=True, cache_images=opt.cache_images), trainBatchSize=trainBatchSize, num_workers=numWorkers, pin_memory=True, collate_fn=dataset.collate_fn)
+    testDataLoader = torch.utils.data.DataLoader(LoadImagesAndLabels(testingPath, testImgSize, trainBatchSize, hyp = trainHyperParams, rect = True, cache_images = opt.cache_images), trainBatchSize = trainBatchSize, num_workers = numWorkers, pin_memory = True, collate_fn = dataset.collate_fn)
 
     # Model parameters
     model.nc = numClasses  # attach number of classes to model
@@ -130,7 +130,7 @@ def train(trainHyperParams):
         
         print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
         
-        progressBar = tqdm(enumerate(dataLoader), total=numBatches)  # progress bar
+        progressBar = tqdm(enumerate(dataLoader), total = numBatches)  # progress bar
 
         for batchIdx, (imgs, targets, paths, null) in progressBar:
             numCompletedBatches = batchIdx + numBatches * epoch  # number integrated batches (since train start)
@@ -155,7 +155,7 @@ def train(trainHyperParams):
             scaleFactor = imgSize / max(imgs.shape[2:])  # scale factor
             if scaleFactor != 1:
                 newShape = [math.ceil(x * scaleFactor / gridSize) * gridSize for x in imgs.shape[2:]]  # new shape (stretched to 32-multiple)
-                imgs = F.interpolate(imgs, size=newShape, mode='bilinear', align_corners=False)
+                imgs = F.interpolate(imgs, size = newShape, mode ='bilinear', align_corners = False)
 
             # Forward
             pred = model(imgs)
@@ -185,7 +185,7 @@ def train(trainHyperParams):
             # Plot
             if numCompletedBatches < 1:
                 f = 'train_batch%g.jpg' % batchIdx  # filename
-                res = plot_images(images=imgs, targets=targets, paths=paths, fname=f)
+                res = plot_images(images = imgs, targets = targets, paths = paths, fname = f)
 
             # end batch ------------------------------------------------------------------------------------------------
 
@@ -196,11 +196,11 @@ def train(trainHyperParams):
         isLastEpoch = epoch + 1 == numEpochs
         if isLastEpoch:  # Calculate mAP
             is_coco = any([x in dataFilePath for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
-            results, mAPs = test.test(configFilePath, dataFilePath, batchSize=trainBatchSize, imgSize=testImgSize, model=model, dataloader=testDataLoader, multi_label=numCompletedBatches > burnInVal)
+            results, mAPs = test.test(configFilePath, dataFilePath, batchSize = trainBatchSize, imgSize = testImgSize, model = model, dataloader = testDataLoader, multi_label = numCompletedBatches > burnInVal)
 
         # Write
         with open(resultOutput, 'a') as f:
-            f.write(s + '%10.3g' * 7 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
+            f.write(s + '%10.3g' * 7 % results + '\n')  # P, R, mAP, F1, test_losses =(GIoU, obj, cls)
 
 
         # Update best mAP
@@ -233,17 +233,17 @@ def train(trainHyperParams):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=300)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
-    parser.add_argument('--batch-size', type=int, default=16)  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='*.cfg path')
-    parser.add_argument('--data', type=str, default='data/coco2017.data', help='*.data path')
-    parser.add_argument('--multi-scale', action='store_true', help='adjust (67%% - 150%%) img_size every 10 batches')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[320, 640], help='[min_train, max-train, test]')
-    parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
-    parser.add_argument('--cache-images', action='store_false', help='cache images for faster training')
-    parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
-    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
-    parser.add_argument('--freeze-layers', action='store_true', help='Freeze non-output layers')
+    parser.add_argument('--epochs', type = int, default = 300)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
+    parser.add_argument('--batch-size', type = int, default = 16)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--cfg', type = str, default ='cfg/yolov3-spp.cfg', help ='*.cfg path')
+    parser.add_argument('--data', type = str, default ='data/coco2017.data', help ='*.data path')
+    parser.add_argument('--multi-scale', action ='store_true', help ='adjust (67%% - 150%%) img_size every 10 batches')
+    parser.add_argument('--img-size', nargs ='+', type = int, default =[320, 640], help ='[min_train, max-train, test]')
+    parser.add_argument('--resume', action ='store_true', help ='resume training from last.pt')
+    parser.add_argument('--cache-images', action ='store_false', help ='cache images for faster training')
+    parser.add_argument('--name', default ='', help ='renames results.txt to results_name.txt if supplied')
+    parser.add_argument('--device', default ='', help ='device id (i.e. 0 or 0,1 or cpu)')
+    parser.add_argument('--freeze-layers', action ='store_true', help ='Freeze non-output layers')
     opt = parser.parse_args()
     
     print(opt)

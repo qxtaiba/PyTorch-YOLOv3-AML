@@ -39,7 +39,7 @@ def exif_size(img):
 
 
 class LoadImages:  # for inference
-    def __init__(self, path, img_size=416):
+    def __init__(self, path, img_size = 416):
         path = str(Path(path))  # os-agnostic
         files = []
         if os.path.isdir(path):
@@ -70,7 +70,7 @@ class LoadImages:  # for inference
         img0 = cv2.imread(path)  # BGR
 
         # Padded resize
-        img = letterbox(img0, new_shape=self.imgSize)[0]
+        img = letterbox(img0, new_shape = self.imgSize)[0]
 
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
@@ -82,7 +82,7 @@ class LoadImages:  # for inference
         return self.numFiles  # number of files
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
-    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, cache_images=False, pad=0.0):
+    def __init__(self, path, img_size = 416, batch_size = 16, augment = False, hyp = None, rect = False, cache_images = False, pad = 0.0):
         path = str(Path(path))  # os-agnostic
         parent = str(Path(path).parent) + os.sep
         if os.path.isfile(path):  # file
@@ -117,10 +117,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             with open(sp, 'r') as f:  # read existing shapefile
                 s = [x.split() for x in f.read().splitlines()]
         except:
-            s = [exif_size(Image.open(f)) for f in tqdm(self.imgFiles, desc='Reading image shapes')]
-            np.savetxt(sp, s, fmt='%g')  # overwrites existing (if any)
+            s = [exif_size(Image.open(f)) for f in tqdm(self.imgFiles, desc ='Reading image shapes')]
+            np.savetxt(sp, s, fmt ='%g')  # overwrites existing (if any)
 
-        self.shapes = np.array(s, dtype=np.float64)
+        self.shapes = np.array(s, dtype = np.float64)
 
         if self.rect:
             # Sort by aspect ratio
@@ -146,13 +146,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         # Cache labels
         self.imgs = [None] * n
-        self.labels = [np.zeros((0, 5), dtype=np.float32)] * n
+        self.labels = [np.zeros((0, 5), dtype = np.float32)] * n
         labels_loaded = False
         numMissingLabels, numFoundLabels, numEmptyLabels, numDuplicateLabels = 0, 0, 0, 0
         np_labels_path = str(Path(self.label_files[0]).parent) + '.npy'  # saved labels in *.npy file
         if os.path.isfile(np_labels_path):
             s = np_labels_path  # print string
-            x = np.load(np_labels_path, allow_pickle=True)
+            x = np.load(np_labels_path, allow_pickle = True)
             if len(x) == n:
                 self.labels = x
                 labels_loaded = True
@@ -166,7 +166,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             else:
                 try:
                     with open(file, 'r') as f:
-                        l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+                        l = np.array([x.split() for x in f.read().splitlines()], dtype = np.float32)
                 except:
                     numMissingLabels += 1  
                     continue
@@ -175,7 +175,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 assert l.shape[1] == 5, '> 5 label columns: %s' % file
                 assert (l >= 0).all(), 'negative labels: %s' % file
                 assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
-                if np.unique(l, axis=0).shape[0] < l.shape[0]:
+                if np.unique(l, axis = 0).shape[0] < l.shape[0]:
                     numDuplicateLabels += 1
 
                 self.labels[i] = l
@@ -207,7 +207,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img, ratio, pad = letterbox(img, shape, auto = False, scaleup = self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             # Load labels
@@ -225,13 +225,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Augment imagespace
             if not self.mosaic:
                 img, labels = random_affine(img, labels,
-                                            degrees=hyp['degrees'],
-                                            translate=hyp['translate'],
-                                            scale=hyp['scale'],
-                                            shear=hyp['shear'])
+                                            degrees = hyp['degrees'],
+                                            translate = hyp['translate'],
+                                            scale = hyp['scale'],
+                                            shear = hyp['shear'])
 
             # Augment colorspace
-            augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
+            augment_hsv(img, hgain = hyp['hsv_h'], sgain = hyp['hsv_s'], vgain = hyp['hsv_v'])
 
             # Apply cutouts
             # if random.random() < 0.9:
@@ -289,24 +289,24 @@ def load_image(self, index):
         r = self.img_size / max(h0, w0)  # resize image to img_size
         if r != 1:  # always resize down, only resize up if training with augmentation
             interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
-            img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+            img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation = interp)
         return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
     else:
         return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
 
 
-def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
+def augment_hsv(img, hgain = 0.5, sgain = 0.5, vgain = 0.5):
     r = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  # random gains
     hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
     dtype = img.dtype  # uint8
 
-    x = np.arange(0, 256, dtype=np.int16)
+    x = np.arange(0, 256, dtype = np.int16)
     lut_hue = ((x * r[0]) % 180).astype(dtype)
     lut_sat = np.clip(x * r[1], 0, 255).astype(dtype)
     lut_val = np.clip(x * r[2], 0, 255).astype(dtype)
 
     img_hsv = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val))).astype(dtype)
-    cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst=img)  # no return needed
+    cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst = img)  # no return needed
 
 
 def load_mosaic(self, index):
@@ -322,7 +322,7 @@ def load_mosaic(self, index):
 
         # place img in img4
         if i == 0:  # top left
-            img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+            img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype = np.uint8)  # base image with 4 tiles
             x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
             x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
         elif i == 1:  # top right
@@ -352,15 +352,15 @@ def load_mosaic(self, index):
     # Concat/clip labels
     if len(labels4):
         labels4 = np.concatenate(labels4, 0)
-        np.clip(labels4[:, 1:], 0, 2 * s, out=labels4[:, 1:])  # use with random_affine
+        np.clip(labels4[:, 1:], 0, 2 * s, out = labels4[:, 1:])  # use with random_affine
 
     # Augment
-    img4, labels4 = random_affine(img4, labels4,degrees=self.hyp['degrees'], translate=self.hyp['translate'], scale=self.hyp['scale'], shear=self.hyp['shear'], border=-s // 2)  # border to remove
+    img4, labels4 = random_affine(img4, labels4,degrees = self.hyp['degrees'], translate = self.hyp['translate'], scale = self.hyp['scale'], shear = self.hyp['shear'], border =-s // 2)  # border to remove
 
     return img4, labels4
 
 
-def letterbox(img, new_shape=(416, 416), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True):
+def letterbox(img, new_shape =(416, 416), color =(114, 114, 114), auto = True, scaleFill = False, scaleup = True):
     # Resize image to a 32-pixel-multiple rectangle https://github.com/ultralytics/yolov3/issues/232
     shape = img.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
@@ -386,15 +386,15 @@ def letterbox(img, new_shape=(416, 416), color=(114, 114, 114), auto=True, scale
     dh /= 2
 
     if shape[::-1] != new_unpad:  # resize
-        img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+        img = cv2.resize(img, new_unpad, interpolation = cv2.INTER_LINEAR)
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value = color)  # add border
     return img, ratio, (dw, dh)
 
 
-def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10, border=0):
-    # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
+def random_affine(img, targets =(), degrees = 10, translate =.1, scale =.1, shear = 10, border = 0):
+    # torchvision.transforms.RandomAffine(degrees =(-10, 10), translate =(.1, .1), scale =(.9, 1.1), shear =(-10, 10))
     # https://medium.com/uruvideo/dataset-augmentation-with-random-homographies-a8f4b44830d4
     # targets = [cls, xyxy]
 
@@ -407,7 +407,7 @@ def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10,
     # a += random.choice([-180, -90, 0, 90])  # add 90deg rotations to small rotations
     s = random.uniform(1 - scale, 1 + scale)
     # s = 2 ** random.uniform(-scale, scale)
-    R[:2] = cv2.getRotationMatrix2D(angle=a, center=(img.shape[1] / 2, img.shape[0] / 2), scale=s)
+    R[:2] = cv2.getRotationMatrix2D(angle = a, center =(img.shape[1] / 2, img.shape[0] / 2), scale = s)
 
     # Translation
     T = np.eye(3)
@@ -422,7 +422,7 @@ def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10,
     # Combined rotation matrix
     M = S @ T @ R  # ORDER IS IMPORTANT HERE!!
     if (border != 0) or (M != np.eye(3)).any():  # image changed
-        img = cv2.warpAffine(img, M[:2], dsize=(width, height), flags=cv2.INTER_LINEAR, borderValue=(114, 114, 114))
+        img = cv2.warpAffine(img, M[:2], dsize =(width, height), flags = cv2.INTER_LINEAR, borderValue =(114, 114, 114))
 
     # Transform label coordinates
     n = len(targets)
