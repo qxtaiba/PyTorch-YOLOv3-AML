@@ -41,7 +41,6 @@ def train(trainHyperParams):
     numEpochs = opt.epochs  # 500200 batches at bs 64, 117263 images = 273 epochs
     trainBatchSize = opt.batch_size
     accumulationInterval = max(round(64 / trainBatchSize), 1)  # accumulate n times before optimizer update (bs 64)
-    trainingWeights = opt.weights  # initial training weights
     minImgSize, maxImgSize, testImgSize = opt.img_size  # img sizes (min, max, test)
 
     # Image Sizes
@@ -61,7 +60,7 @@ def train(trainHyperParams):
     np.random.seed(seed)
     torch_utils.init_seeds(seed=seed)
     torch.manual_seed(seed)
-    # Reduce randomness (may be slower on Tesla GPUs) # https://pytorch.org/docs/stable/notes/randomness.html
+    # Reduce randomness 
     if seed == 0:
         cudnn.deterministic = False
         cudnn.benchmark = True
@@ -97,11 +96,6 @@ def train(trainHyperParams):
     beginningEpoch = 0
     bestFitnessScore = 0.0
     
-    if len(trainingWeights) > 0:
-    # load weights darknet format
-    # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
-        load_darknet_weights(model, trainingWeights)
-
     lf = lambda x: (((1 + math.cos(x * math.pi / numEpochs)) / 2) ** 1.0) * 0.95 + 0.05  # cosine
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     scheduler.last_epoch = beginningEpoch - 1 
@@ -210,7 +204,11 @@ def train(trainHyperParams):
 
 
         # Update best mAP
-        fitnessScore = fitness(np.array(results).reshape(1, -1))  # fitness_i = weighted combination of [P, R, mAP, F1]
+        arg = np.array(results).reshape(1, -1)
+        w = [0.0, 0.01, 0.99, 0.00]  # weights for [P, R, mAP, F1]@0.5 or [P, R, mAP@0.5, mAP@0.5:0.95]
+        fitnessScore = (arg[:, :4] * w).sum(1)  # fitness_i = weighted combination of [P, R, mAP, F1]
+
+         
         if fitnessScore > bestFitnessScore:
             bestFitnessScore = fitnessScore
 
@@ -243,13 +241,11 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', nargs='+', type=int, default=[320, 640], help='[min_train, max-train, test]')
     parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
     parser.add_argument('--cache-images', action='store_false', help='cache images for faster training')
-    parser.add_argument('--weights', type=str, default='weights/yolov3-spp-ultralytics.pt', help='initial weights path')
     parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--freeze-layers', action='store_true', help='Freeze non-output layers')
     opt = parser.parse_args()
     
-    opt.weights = last if opt.resume and not opt.weights else opt.weights
     print(opt)
     opt.img_size.extend([opt.img_size[-1]] * (3 - len(opt.img_size)))  # extend to 3 sizes (min, max, test)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
