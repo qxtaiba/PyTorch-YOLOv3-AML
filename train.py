@@ -252,7 +252,7 @@ if __name__ == '__main__':
     opt.weights = last if opt.resume and not opt.weights else opt.weights
     print(opt)
     opt.img_size.extend([opt.img_size[-1]] * (3 - len(opt.img_size)))  # extend to 3 sizes (min, max, test)
-    device = torch_utils.select_device(opt.device, apex=False, batch_size=opt.batch_size)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train(trainHyperParams)  # train normally
 

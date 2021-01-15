@@ -13,7 +13,7 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
     # Initialize/load model and set device
     if model is None:
         isTraining = False
-        device = torch_utils.select_device(opt.device, batch_size=batchSize)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         verbose = True
 
         # Remove previous
