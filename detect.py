@@ -20,8 +20,10 @@ def detect():
     # Initialize model
     model = Darknet(opt.cfg, imgsz)
 
-    # Load weights
-    model.load_state_dict(torch.load(weights, map_location = device)['model'])
+    if weights.endswith('.pt'):  # pytorch format
+        model.load_state_dict(torch.load(weights, map_location=device)['model'])
+    else:  # darknet format
+        load_darknet_weights(model, weights)
 
     # Eval mode
     model.to(device).eval()
@@ -74,17 +76,14 @@ def detect():
                     label = '%s %.2f' % (names[int(cls)], conf)
                     plot_one_box(xyxy, im0, label = label, color = colors[int(cls)])
 
-            # Stream results
-            cv2.imshow(p, im0)
-
             # Save results (image with detections)
             cv2.imwrite(saveDir, im0)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type = str, default ='cfg/yolov3-spp.cfg', help ='*.cfg path')
+    parser.add_argument('--cfg', type = str, default ='cfg/yolov3.cfg', help ='*.cfg path')
     parser.add_argument('--names', type = str, default ='data/coco.names', help ='*.names path')
-    parser.add_argument('--weights', type = str, default ='weights/yolov3-spp-ultralytics.pt', help ='weights path')
+    parser.add_argument('--weights', type = str, default ='weights/yolov3.weights', help ='weights path')
     parser.add_argument('--source', type = str, default ='data/samples', help ='source')  # input file/folder, 0 for webcam
     parser.add_argument('--output', type = str, default ='output', help ='output folder')  # output folder
     parser.add_argument('--img-size', type = int, default = 512, help ='inference size (pixels)')
