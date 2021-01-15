@@ -62,7 +62,6 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
     seen = 0
     model.eval()
     _ = model(torch.zeros((1, 3, imgsz, imgsz), device=device)) if device.type != 'cpu' else None  # run once
-    coco91class = [i for i in range(1,91)]
     s = ('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1')
     precision, recall, F1, meanPrecision, meanRecall, mAP, meanF1 = 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
