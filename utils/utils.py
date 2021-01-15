@@ -417,7 +417,6 @@ def output_to_target(output, width, height):
     return np.array(targets)
 
 
-# Plotting functions ---------------------------------------------------------------------------------------------------
 def plot_one_box(x, img, color = None, label = None, line_thickness = None):
     # Plots one bounding box on image img
     tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
@@ -515,7 +514,6 @@ def plot_images(images, targets, paths = None, fname ='images.jpg', names = None
     return mosaic
 
 def plot_results(start = 0, stop = 0, bucket ='', id =()):  # from utils.utils import *; plot_results()
-    # Plot training 'results*.txt' as seen in https://github.com/ultralytics/yolov3#training
     fig, ax = plt.subplots(2, 5, figsize =(12, 6), tight_layout = True)
     ax = ax.ravel()
     s = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall',
@@ -523,21 +521,18 @@ def plot_results(start = 0, stop = 0, bucket ='', id =()):  # from utils.utils i
 
     files = glob.glob('results*.txt') + glob.glob('../../Downloads/results*.txt')
     for f in sorted(files):
-        try:
-            results = np.loadtxt(f, usecols =[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin = 2).T
-            n = results.shape[1]  # number of rows
-            x = range(start, min(stop, n) if stop else n)
-            for i in range(10):
-                y = results[i, x]
-                if i in [0, 1, 2, 5, 6, 7]:
-                    y[y == 0] = np.nan  # dont show zero loss values
-                    # y /= y[0]  # normalize
-                ax[i].plot(x, y, marker ='.', label = Path(f).stem, linewidth = 2, markersize = 8)
-                ax[i].set_title(s[i])
-                # if i in [5, 6, 7]:  # share train and val loss y axes
-                #     ax[i].get_shared_y_axes().join(ax[i], ax[i - 5])
-        except:
-            print('Warning: Plotting error for %s, skipping file' % f)
+        results = np.loadtxt(f, usecols =[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin = 2).T
+        n = results.shape[1]  # number of rows
+        x = range(start, min(stop, n) if stop else n)
+        for i in range(10):
+            y = results[i, x]
+            if i in [0, 1, 2, 5, 6, 7]:
+                y[y == 0] = np.nan  # dont show zero loss values
+                # y /= y[0]  # normalize
+            ax[i].plot(x, y, marker ='.', label = Path(f).stem, linewidth = 2, markersize = 8)
+            ax[i].set_title(s[i])
+            # if i in [5, 6, 7]:  # share train and val loss y axes
+            #     ax[i].get_shared_y_axes().join(ax[i], ax[i - 5])
 
     ax[1].legend()
     fig.savefig('results.png', dpi = 200)

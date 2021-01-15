@@ -58,7 +58,6 @@ def train(trainHyperParams):
     seed = 0
     random.seed(seed)
     np.random.seed(seed)
-    torch_utils.init_seeds(seed = seed)
     torch.manual_seed(seed)
     # Reduce randomness 
     if seed == 0:

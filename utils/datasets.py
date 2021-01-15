@@ -22,7 +22,6 @@ for orientation in ExifTags.TAGS.keys():
     if ExifTags.TAGS[orientation] == 'Orientation':
         break
 
-
 def exif_size(img):
     # Returns exif-corrected PIL size
     s = img.size  # (width, height)
@@ -42,6 +41,7 @@ class LoadImages:  # for inference
     def __init__(self, path, img_size = 416):
         path = str(Path(path))  # os-agnostic
         files = []
+
         if os.path.isdir(path):
             files = sorted(glob.glob(os.path.join(path, '*.*')))
         elif os.path.isfile(path):
@@ -82,25 +82,25 @@ class LoadImages:  # for inference
         return self.numFiles  # number of files
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
+    
     def __init__(self, path, img_size = 416, batch_size = 16, augment = False, hyp = None, rect = False, cache_images = False, pad = 0.0):
+        
         path = str(Path(path))  # os-agnostic
         parent = str(Path(path).parent) + os.sep
-        if os.path.isfile(path):  # file
-            with open(path, 'r') as f:
-                f = f.read().splitlines()
-                f = [x.replace('./', parent) if x.startswith('./') else x for x in f]  # local to global path
-        elif os.path.isdir(path):  # folder
-            f = glob.iglob(path + os.sep + '*.*')
+
+        with open(path, 'r') as f:
+            f = f.read().splitlines()
+            f = [x.replace('./', parent) if x.startswith('./') else x for x in f]  # local to global path
 
         self.imgFiles = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in img_formats]
 
-        n = len(self.imgFiles)
-        batchIdx = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        numFiles = len(self.imgFiles)
+        batchIdx = np.floor(np.arange(numFiles) / batch_size).astype(np.int)  # batch index
         numBatches = batchIdx[-1] + 1  # number of batches
 
-        self.numImages = n  # number of images
+        self.numImages = numFiles  # number of images
         self.batch = batchIdx  # batch index of image
-        self.img_size = img_size
+        self.imgSize = img_size
         self.augment = augment
         self.hyp = hyp
         self.rect = rect
@@ -115,21 +115,21 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         
         try:
             with open(sp, 'r') as f:  # read existing shapefile
-                s = [x.split() for x in f.read().splitlines()]
+                printStr = [x.split() for x in f.read().splitlines()]
         except:
-            s = [exif_size(Image.open(f)) for f in tqdm(self.imgFiles, desc ='Reading image shapes')]
-            np.savetxt(sp, s, fmt ='%g')  # overwrites existing (if any)
+            printStr = [exif_size(Image.open(f)) for f in tqdm(self.imgFiles, desc ='Reading image shapes')]
+            np.savetxt(sp, printStr, fmt ='%g')  # overwrites existing (if any)
 
-        self.shapes = np.array(s, dtype = np.float64)
+        self.shapes = np.array(printStr, dtype = np.float64)
 
         if self.rect:
             # Sort by aspect ratio
-            s = self.shapes  # wh
-            ar = s[:, 1] / s[:, 0]  # aspect ratio
+            printStr = self.shapes  # wh
+            ar = printStr[:, 1] / printStr[:, 0]  # aspect ratio
             irect = ar.argsort()
             self.imgFiles = [self.imgFiles[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
-            self.shapes = s[irect]  # wh
+            self.shapes = printStr[irect]  # wh
             ar = ar[irect]
 
             # Set training image shapes
@@ -143,50 +143,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     shapes[i] = [1, 1 / mini]
 
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / 32. + pad).astype(np.int) * 32
-
-        # Cache labels
-        self.imgs = [None] * n
-        self.labels = [np.zeros((0, 5), dtype = np.float32)] * n
-        labels_loaded = False
-        numMissingLabels, numFoundLabels, numEmptyLabels, numDuplicateLabels = 0, 0, 0, 0
-        np_labels_path = str(Path(self.label_files[0]).parent) + '.npy'  # saved labels in *.npy file
-        if os.path.isfile(np_labels_path):
-            s = np_labels_path  # print string
-            x = np.load(np_labels_path, allow_pickle = True)
-            if len(x) == n:
-                self.labels = x
-                labels_loaded = True
-        else:
-            s = path.replace('images', 'labels')
-
-        pbar = tqdm(self.label_files)
-        for i, file in enumerate(pbar):
-            if labels_loaded:
-                l = self.labels[i]
-            else:
-                try:
-                    with open(file, 'r') as f:
-                        l = np.array([x.split() for x in f.read().splitlines()], dtype = np.float32)
-                except:
-                    numMissingLabels += 1  
-                    continue
-
-            if l.shape[0]:
-                assert l.shape[1] == 5, '> 5 label columns: %s' % file
-                assert (l >= 0).all(), 'negative labels: %s' % file
-                assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
-                if np.unique(l, axis = 0).shape[0] < l.shape[0]:
-                    numDuplicateLabels += 1
-
-                self.labels[i] = l
-                numFoundLabels += 1
-
-            else:
-                numEmptyLabels += 1
-
-            pbar.desc = 'Caching labels %s (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (
-                s, numFoundLabels, numMissingLabels, numEmptyLabels, numDuplicateLabels, n)
-
 
     def __len__(self):
         return len(self.imgFiles)
@@ -206,7 +162,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             img, (h0, w0), (h, w) = load_image(self, index)
 
             # Letterbox
-            shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
+            shape = self.batch_shapes[self.batch[index]] if self.rect else self.imgSize  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto = False, scaleup = self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
@@ -224,21 +180,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if self.augment:
             # Augment imagespace
             if not self.mosaic:
-                img, labels = random_affine(img, labels,
-                                            degrees = hyp['degrees'],
-                                            translate = hyp['translate'],
-                                            scale = hyp['scale'],
-                                            shear = hyp['shear'])
+                img, labels = random_affine(img, labels, degrees = hyp['degrees'], translate = hyp['translate'], scale = hyp['scale'], shear = hyp['shear'])
 
             # Augment colorspace
             augment_hsv(img, hgain = hyp['hsv_h'], sgain = hyp['hsv_s'], vgain = hyp['hsv_v'])
 
-            # Apply cutouts
-            # if random.random() < 0.9:
-            #     labels = cutout(img, labels)
 
-        nL = len(labels)  # number of labels
-        if nL:
+        if len(labels) :
             # convert xyxy to xywh
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])
 
@@ -251,18 +199,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             lr_flip = True
             if lr_flip and random.random() < 0.5:
                 img = np.fliplr(img)
-                if nL:
+                if len(labels) :
                     labels[:, 1] = 1 - labels[:, 1]
 
-            # random up-down flip
-            ud_flip = False
-            if ud_flip and random.random() < 0.5:
-                img = np.flipud(img)
-                if nL:
-                    labels[:, 2] = 1 - labels[:, 2]
-
-        labels_out = torch.zeros((nL, 6))
-        if nL:
+        labels_out = torch.zeros((len(labels) , 6))
+        if len(labels) :
             labels_out[:, 1:] = torch.from_numpy(labels)
 
         # Convert
@@ -375,12 +316,9 @@ def letterbox(img, new_shape =(416, 416), color =(114, 114, 114), auto = True, s
     ratio = r, r  # width, height ratios
     new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
     dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+    
     if auto:  # minimum rectangle
         dw, dh = np.mod(dw, 32), np.mod(dh, 32)  # wh padding
-    elif scaleFill:  # stretch
-        dw, dh = 0.0, 0.0
-        new_unpad = new_shape
-        ratio = new_shape[0] / shape[1], new_shape[1] / shape[0]  # width, height ratios
 
     dw /= 2  # divide padding into 2 sides
     dh /= 2
@@ -451,4 +389,3 @@ def random_affine(img, targets =(), degrees = 10, translate =.1, scale =.1, shea
         targets[:, 1:5] = xy[i]
 
     return img, targets
-
