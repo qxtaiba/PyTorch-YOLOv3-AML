@@ -236,10 +236,6 @@ def wh_iou(wh1, wh2):
     inter = torch.min(wh1, wh2).prod(2)  # [N,M]
     return inter / (wh1.prod(2) + wh2.prod(2) - inter)  # iou = inter / (area1 + area2 - inter)
 
-def smooth_BCE(eps=0.1):
-    # return positive, negative label smoothing BCE targets
-    return 1.0 - 0.5 * eps, 0.5 * eps
-
 
 def compute_loss(p, targets, model):  # predictions, targets, model
     FloatTensor = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
@@ -252,7 +248,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     BCEobj = nn.BCEWithLogitsLoss(pos_weight=FloatTensor([model.hyp['obj_pw']]), reduction=red)
 
     # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
-    cp, cn = smooth_BCE(eps=0.0)
+    cp, cn = 1.0 - 0.5 * 0.0, 0.5 * 0.0
 
     # per output
     cumNumTargets = 0  # targets
