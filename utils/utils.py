@@ -289,7 +289,7 @@ def build_targets(p, targets, model):
     gain = torch.ones(6, device = targets.device)  # normalized to gridspace gain
 
     for idx, layer in enumerate(model.yolo_layers):
-        anchors = model.module_list[layer].anchor_vec
+        anchors = model.module_list[layer].anchorVector
         gain[2:] = torch.tensor(p[idx].shape)[[3, 2, 3, 2]]  # xyxy gain
         numAnchors = anchors.shape[0]  # number of anchors
         anchorTensor = torch.arange(numAnchors).view(numAnchors, 1).repeat(1, numTargets)  # anchor tensor, same as .repeat_interleave(nt)

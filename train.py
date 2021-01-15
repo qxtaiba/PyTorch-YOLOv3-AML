@@ -101,15 +101,15 @@ def train(trainHyperParams):
     scheduler.last_epoch = beginningEpoch - 1 
     
     # Dataset
-    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment = True, hyp = trainHyperParams, rect = False, cache_images = opt.cache_images)
+    dataset = LoadImagesAndLabels(trainingPath, imgSize, trainBatchSize, augment = True, hyp = trainHyperParams, rect = False, cache_images = False)
 
     # Dataloader
     trainBatchSize = min(trainBatchSize, len(dataset))
     numWorkers = min([os.cpu_count(), trainBatchSize if trainBatchSize > 1 else 0, 8])  # number of workers
-    dataLoader = torch.utils.data.DataLoader(dataset, trainBatchSize = trainBatchSize, num_workers = numWorkers, shuffle = True,  pin_memory = True, collate_fn = dataset.collate_fn)
+    dataLoader = torch.utils.data.DataLoader(dataset, batch_size = trainBatchSize, num_workers = numWorkers, shuffle = True,  pin_memory = True, collate_fn = dataset.collate_fn)
 
     # Testloader
-    testDataLoader = torch.utils.data.DataLoader(LoadImagesAndLabels(testingPath, testImgSize, trainBatchSize, hyp = trainHyperParams, rect = True, cache_images = opt.cache_images), trainBatchSize = trainBatchSize, num_workers = numWorkers, pin_memory = True, collate_fn = dataset.collate_fn)
+    testDataLoader = torch.utils.data.DataLoader(LoadImagesAndLabels(testingPath, testImgSize, trainBatchSize, hyp = trainHyperParams, rect = True, cache_images = False), batch_size = trainBatchSize, num_workers = numWorkers, pin_memory = True, collate_fn = dataset.collate_fn)
 
     # Model parameters
     model.nc = numClasses  # attach number of classes to model
@@ -178,7 +178,7 @@ def train(trainHyperParams):
             # Print
             meanLoss = (meanLoss * batchIdx + lossItems) / (batchIdx + 1)  # update mean losses
             
-            mem = '%.3gG' % (torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
+            mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
             s = ('%10s' * 2 + '%10.3g' * 6) % ('%g/%g' % (epoch, numEpochs - 1), mem, *meanLoss, len(targets), imgSize)
             progressBar.set_description(s)
 
@@ -227,7 +227,6 @@ def train(trainHyperParams):
     # end training
 
     plot_results()  # save as results.png
-    torch.cuda.empty_cache()
     return results
 
 
@@ -240,10 +239,8 @@ if __name__ == '__main__':
     parser.add_argument('--multi-scale', action ='store_true', help ='adjust (67%% - 150%%) img_size every 10 batches')
     parser.add_argument('--img-size', nargs ='+', type = int, default =[320, 640], help ='[min_train, max-train, test]')
     parser.add_argument('--resume', action ='store_true', help ='resume training from last.pt')
-    parser.add_argument('--cache-images', action ='store_false', help ='cache images for faster training')
     parser.add_argument('--name', default ='', help ='renames results.txt to results_name.txt if supplied')
     parser.add_argument('--device', default ='', help ='device id (i.e. 0 or 0,1 or cpu)')
-    parser.add_argument('--freeze-layers', action ='store_true', help ='Freeze non-output layers')
     opt = parser.parse_args()
     
     print(opt)

@@ -243,11 +243,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 pbar.desc = 'Caching images (%.1fGB)' % (gb / 1E9)
 
     def __len__(self):
-        return len(self.imgFiles)
+        return len(self.img_files)
 
     def __getitem__(self, index):
-        if self.imgWeights:
-            index = self.indices[index]
 
         hyp = self.hyp
         if self.mosaic:
@@ -308,7 +306,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
-        return torch.from_numpy(img), labels_out, self.imgFiles[index], shapes
+        return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
     @staticmethod
     def collate_fn(batch):
