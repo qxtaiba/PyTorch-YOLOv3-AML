@@ -21,10 +21,7 @@ def detect():
     model = Darknet(opt.cfg, imgsz)
 
     # Load weights
-    if weights.endswith('.pt'):  # pytorch format
-        model.load_state_dict(torch.load(weights, map_location=device)['model'])
-    else:  # darknet format
-        load_darknet_weights(model, weights)
+    model.load_state_dict(torch.load(weights, map_location=device)['model'])
 
     # Eval mode
     model.to(device).eval()

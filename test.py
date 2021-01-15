@@ -24,10 +24,7 @@ def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=
         model = Darknet(cfg, imgSize)
 
         # Load weights
-        if weights.endswith('.pt'):  # pytorch format
-            model.load_state_dict(torch.load(weights, map_location=device)['model'])
-        else:  # darknet format
-            load_darknet_weights(model, weights)
+        model.load_state_dict(torch.load(weights, map_location=device)['model'])
 
         # Fuse
         model.fuse()
