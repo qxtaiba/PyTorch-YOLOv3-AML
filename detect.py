@@ -33,7 +33,10 @@ def detect():
     dataset = LoadImages(source, img_size=imgsz)
 
     # Get names and colors
-    names = load_classes(opt.names)
+    with open(opt.names, 'r') as f:
+        lines = f.read().split('\n')
+    names = list(filter(None, lines))  # filter removes empty strings (such as last line)
+    
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
     # Run inference

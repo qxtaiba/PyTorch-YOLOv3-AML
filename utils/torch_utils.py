@@ -9,13 +9,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def init_seeds(seed=0):
-    torch.manual_seed(seed)
-    # Reduce randomness (may be slower on Tesla GPUs) # https://pytorch.org/docs/stable/notes/randomness.html
-    if seed == 0:
-        cudnn.deterministic = False
-        cudnn.benchmark = True
-
 
 def select_device(device='', apex=False, batch_size=None):
     # device = 'cpu' or '0' or '0,1,2,3'
@@ -42,12 +35,6 @@ def select_device(device='', apex=False, batch_size=None):
 
     print('')  # skip a line
     return torch.device('cuda:0' if cuda else 'cpu')
-
-
-def time_synchronized():
-    torch.cuda.synchronize() if torch.cuda.is_available() else None
-    return time.time()
-
 
 def fuse_conv_and_bn(conv, bn):
     # https://tehnokv.com/posts/fusing-batchnorm-and-conv/

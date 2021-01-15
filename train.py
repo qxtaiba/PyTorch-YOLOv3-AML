@@ -56,7 +56,16 @@ def train(trainHyperParams):
     imgSize = maxImgSize  # initialize with max size
 
     # Configure run
-    init_seeds()
+    seed = 0
+    random.seed(seed)
+    np.random.seed(seed)
+    torch_utils.init_seeds(seed=seed)
+    torch.manual_seed(seed)
+    # Reduce randomness (may be slower on Tesla GPUs) # https://pytorch.org/docs/stable/notes/randomness.html
+    if seed == 0:
+        cudnn.deterministic = False
+        cudnn.benchmark = True
+
     parsedData = parse_data_cfg(dataFilePath)
     trainingPath = parsedData['train']
     testingPath = parsedData['valid']
@@ -112,7 +121,6 @@ def train(trainHyperParams):
     model.nc = numClasses  # attach number of classes to model
     model.hyp = trainHyperParams  # attach hyperparameters to model
     model.gr = 1.0  # giou loss ratio (obj_loss = 1.0 or giou)
-    model.class_weights = labels_to_class_weights(dataset.labels, numClasses).to(device)  # attach class weights
 
     # Start training
     numBatches = len(dataLoader)  # number of batches

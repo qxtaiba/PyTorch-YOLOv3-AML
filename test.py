@@ -44,7 +44,11 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
     data = parse_data_cfg(data)
     numClasses =  int(data['classes'])  # number of classes
     testPath = data['valid']  # path to test images
-    classNames = load_classes(data['names'])  # class names
+    with open(data['names'], 'r') as f:
+        names = f.read().split('\n')
+    classNames = list(filter(None, names))  # filter removes empty strings (such as last line) # class names
+
+    
     iouVector = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     iouVector = iouVector[0].view(1)  # comment for mAP@0.5:0.95
     niou = iouVector.numel()
@@ -58,7 +62,7 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
     seen = 0
     model.eval()
     _ = model(torch.zeros((1, 3, imgsz, imgsz), device=device)) if device.type != 'cpu' else None  # run once
-    coco91class = coco80_to_coco91_class()
+    coco91class = [i for i in range(1,91)]
     s = ('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1')
     precision, recall, F1, meanPrecision, meanRecall, mAP, meanF1 = 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
@@ -73,7 +77,6 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
         # Disable gradients
         with torch.no_grad():
             # Run model
-            t = torch_utils.time_synchronized()
             inferenceOutput, trainingOutput = model(imgs, augment=augment)  # inference and training outputs
 
             # Compute loss
@@ -97,9 +100,12 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
 
 
             # Clip boxes to image bounds
-            clip_coords(pred, (height, width))
+            # Clip bounding xyxy bounding boxes to image shape (height, width)
+            pred[:, 0].clamp_(0, width)  # x1
+            pred[:, 1].clamp_(0, height)  # y1
+            pred[:, 2].clamp_(0, width)  # x2
+            pred[:, 3].clamp_(0, height)  # y2
 
-            
             # Assign all predictions as incorrect
             correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
             if numLabels:

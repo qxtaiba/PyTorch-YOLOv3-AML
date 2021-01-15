@@ -18,7 +18,7 @@ import torch.nn as nn
 import torchvision
 from tqdm import tqdm
 
-from . import torch_utils  # , google_utils
+from . import torch_utils  
 
 # Set printoptions
 torch.set_printoptions(linewidth=320, precision=5, profile='long')
@@ -27,52 +27,6 @@ matplotlib.rc('font', **{'size': 11})
 
 # Prevent OpenCV from multithreading (to use PyTorch DataLoader)
 cv2.setNumThreads(0)
-
-
-def init_seeds(seed=0):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch_utils.init_seeds(seed=seed)
-
-
-
-
-def load_classes(path):
-    # Loads *.names file at 'path'
-    with open(path, 'r') as f:
-        names = f.read().split('\n')
-    return list(filter(None, names))  # filter removes empty strings (such as last line)
-
-
-def labels_to_class_weights(labels, nc=80):
-    # Get class weights (inverse frequency) from training labels
-    if labels[0] is None:  # no labels loaded
-        return torch.Tensor()
-
-    labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
-    classes = labels[:, 0].astype(np.int)  # labels = [class xywh]
-    weights = np.bincount(classes, minlength=nc)  # occurences per class
-
-    # Prepend gridpoint count (for uCE trianing)
-    # gpi = ((320 / 32 * np.array([1, 2, 4])) ** 2 * 3).sum()  # gridpoints per image
-    # weights = np.hstack([gpi * len(labels)  - weights.sum() * 9, weights * 9]) ** 0.5  # prepend gridpoints to start
-
-    weights[weights == 0] = 1  # replace empty bins with 1
-    weights = 1 / weights  # number of targets per class
-    weights /= weights.sum()  # normalize
-    return torch.from_numpy(weights)
-
-def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
-    # https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
-    # a = np.loadtxt('data/coco.names', dtype='str', delimiter='\n')
-    # b = np.loadtxt('data/coco_paper.names', dtype='str', delimiter='\n')
-    # x1 = [list(a[i] == b).index(True) + 1 for i in range(80)]  # darknet to coco
-    # x2 = [list(b[i] == a).index(True) if any(b[i] == a) else None for i in range(91)]  # coco to darknet
-    x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28, 31, 32, 33, 34,
-         35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-         64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
-    return x
-
 
 def xyxy2xywh(x):
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
@@ -106,16 +60,14 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
     coords[:, [0, 2]] -= pad[0]  # x padding
     coords[:, [1, 3]] -= pad[1]  # y padding
     coords[:, :4] /= gain
-    clip_coords(coords, img0_shape)
-    return coords
 
-
-def clip_coords(boxes, img_shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
-    boxes[:, 0].clamp_(0, img_shape[1])  # x1
-    boxes[:, 1].clamp_(0, img_shape[0])  # y1
-    boxes[:, 2].clamp_(0, img_shape[1])  # x2
-    boxes[:, 3].clamp_(0, img_shape[0])  # y2
+    coords[:, 0].clamp_(0, img0_shape[1])  # x1
+    coords[:, 1].clamp_(0, img0_shape[0])  # y1
+    coords[:, 2].clamp_(0, img0_shape[1])  # x2
+    coords[:, 3].clamp_(0, img0_shape[0])  # y2
+
+    return coords
 
 
 def ap_per_class(tp, conf, pred_cls, target_cls):
@@ -210,48 +162,44 @@ def compute_ap(recall, precision):
     return ap
 
 
-def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False):
+def bbox_iou(firstBox, secondBox, x1y1x2y2=True, GIoU=False):
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
-    box2 = box2.t()
+    secondBox = secondBox.t()
 
     # Get the coordinates of bounding boxes
     if x1y1x2y2:  # x1, y1, x2, y2 = box1
-        b1_x1, b1_y1, b1_x2, b1_y2 = box1[0], box1[1], box1[2], box1[3]
-        b2_x1, b2_y1, b2_x2, b2_y2 = box2[0], box2[1], box2[2], box2[3]
+        # Transform from center and width to exact coordinates
+        firstBoxX1, firstBoxY1, firstBoxX2, firstBoxY2 = firstBox[0], firstBox[1], firstBox[2], firstBox[3]
+        secondBoxX1, secondBoxY1, secondBoxX2, secondBoxY2 = secondBox[0], secondBox[1], secondBox[2], secondBox[3]
     else:  # transform from xywh to xyxy
-        b1_x1, b1_x2 = box1[0] - box1[2] / 2, box1[0] + box1[2] / 2
-        b1_y1, b1_y2 = box1[1] - box1[3] / 2, box1[1] + box1[3] / 2
-        b2_x1, b2_x2 = box2[0] - box2[2] / 2, box2[0] + box2[2] / 2
-        b2_y1, b2_y2 = box2[1] - box2[3] / 2, box2[1] + box2[3] / 2
+        # Get the coordinates of bounding boxes
+        firstBoxX1, firstBoxX2 = firstBox[0] - firstBox[2] / 2, firstBox[0] + firstBox[2] / 2
+        firstBoxY1, firstBoxY2 = firstBox[1] - firstBox[3] / 2, firstBox[1] + firstBox[3] / 2
+        secondBoxX1, secondBoxX2 = secondBox[0] - secondBox[2] / 2, secondBox[0] + secondBox[2] / 2
+        secondBoxY1, secondBoxY2 = secondBox[1] - secondBox[3] / 2, secondBox[1] + secondBox[3] / 2
 
+     # extract intersection rectangle coordinates
+    rectIntersectionX1, rectIntersectionY1  = torch.max(firstBoxX1, secondBoxX1), torch.max(firstBoxY1, secondBoxY1) 
+    rectIntersectionX2, rectIntersectionY2 = torch.min(firstBoxX2, secondBoxX2), torch.min(firstBoxY2, secondBoxY2)
+    
     # Intersection area
-    inter = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * \
-            (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
+    intersectionWidth = (rectIntersectionX2 - rectIntersectionX1).clamp(0)
+    intersectionHeight = (rectIntersectionY2 - rectIntersectionY1).clamp(0)
+
+    intersectionArea = intersectionWidth * intersectionHeight
 
     # Union Area
-    w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1
-    w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1
-    union = (w1 * h1 + 1e-16) + w2 * h2 - inter
+    firstWidth, firstHeight = firstBoxX2 - firstBoxX1, firstBoxY2 - firstBoxY1
+    secondWidth, secondHeight = secondBoxX2 - secondBoxX1, secondBoxY2 - secondBoxY1
+    unionArea = (firstWidth * firstHeight + 1e-16) + secondWidth * secondHeight - intersectionArea
 
-    iou = inter / union  # iou
-    if GIoU or DIoU or CIoU:
-        cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
-        ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
-        if GIoU:  # Generalized IoU https://arxiv.org/pdf/1902.09630.pdf
-            c_area = cw * ch + 1e-16  # convex area
-            return iou - (c_area - union) / c_area  # GIoU
-        if DIoU or CIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
-            # convex diagonal squared
-            c2 = cw ** 2 + ch ** 2 + 1e-16
-            # centerpoint distance squared
-            rho2 = ((b2_x1 + b2_x2) - (b1_x1 + b1_x2)) ** 2 / 4 + ((b2_y1 + b2_y2) - (b1_y1 + b1_y2)) ** 2 / 4
-            if DIoU:
-                return iou - rho2 / c2  # DIoU
-            elif CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
-                v = (4 / math.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
-                with torch.no_grad():
-                    alpha = v / (1 - iou + v)
-                return iou - (rho2 / c2 + v * alpha)  # CIoU
+    iou = intersectionArea / unionArea  # iou
+    
+    if GIoU:
+        smallestEnclosingWidth = torch.max(firstBoxX2, secondBoxX2) - torch.min(firstBoxX1, secondBoxX1)  # convex (smallest enclosing box) width
+        smallestEnclosingHeight = torch.max(firstBoxY2, secondBoxY2) - torch.min(firstBoxY1, secondBoxY1)  # convex height
+        smallestEnclosingArea = smallestEnclosingWidth * smallestEnclosingHeight + 1e-16  # convex area
+        return iou - (smallestEnclosingArea - unionArea) / smallestEnclosingArea  # GIoU
 
     return iou
 
@@ -325,70 +273,58 @@ def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#iss
 
 
 def compute_loss(p, targets, model):  # predictions, targets, model
-    ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj = ft([0]), ft([0]), ft([0])
+    FloatTensor = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
+    classLoss, boxLoss, objectLoss = FloatTensor([0]), FloatTensor([0]), FloatTensor([0])
     tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
-    h = model.hyp  # hyperparameters
     red = 'mean'  # Loss reduction (sum or mean)
 
     # Define criteria
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([h['cls_pw']]), reduction=red)
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([h['obj_pw']]), reduction=red)
+    BCEcls = nn.BCEWithLogitsLoss(pos_weight=FloatTensor([model.hyp['cls_pw']]), reduction=red)
+    BCEobj = nn.BCEWithLogitsLoss(pos_weight=FloatTensor([model.hyp['obj_pw']]), reduction=red)
 
     # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
     cp, cn = smooth_BCE(eps=0.0)
 
     # focal loss
-    g = h['fl_gamma']  # focal loss gamma
+    g = model.hyp['fl_gamma']  # focal loss gamma
     if g > 0:
         BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
     # per output
-    nt = 0  # targets
-    for i, pi in enumerate(p):  # layer index, layer predictions
-        b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-        tobj = torch.zeros_like(pi[..., 0])  # target obj
+    cumNumTargets = 0  # targets
+    for layerIdx, layerPrediction in enumerate(p):  # layer index, layer predictions
+        b, a, gj, gi = indices[layerIdx]  # image, anchor, gridy, gridx
+        tobj = torch.zeros_like(layerPrediction[..., 0])  # target obj
 
-        nb = b.shape[0]  # number of targets
-        if nb:
-            nt += nb  # cumulative targets
-            ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
+        numTargets = b.shape[0]  # number of targets
+        if numTargets:
+            cumNumTargets += numTargets  # cumulative targets
+            predictionSubset = layerPrediction[b, a, gj, gi]  # prediction subset corresponding to targets
 
             # GIoU
-            pxy = ps[:, :2].sigmoid()
-            pwh = ps[:, 2:4].exp().clamp(max=1E3) * anchors[i]
+            pxy = predictionSubset[:, :2].sigmoid()
+            pwh = predictionSubset[:, 2:4].exp().clamp(max=1E3) * anchors[layerIdx]
             pbox = torch.cat((pxy, pwh), 1)  # predicted box
-            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou(prediction, target)
-            lbox += (1.0 - giou).sum() if red == 'sum' else (1.0 - giou).mean()  # giou loss
+            giou = bbox_iou(pbox.t(), tbox[layerIdx], x1y1x2y2=False, GIoU=True)  # giou(prediction, target)
+            boxLoss += (1.0 - giou).mean()  # giou loss
 
             # Obj
             tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
 
             # Class
             if model.nc > 1:  # cls loss (only if multiple classes)
-                t = torch.full_like(ps[:, 5:], cn)  # targets
-                t[range(nb), tcls[i]] = cp
-                lcls += BCEcls(ps[:, 5:], t)  # BCE
+                t = torch.full_like(predictionSubset[:, 5:], cn)  # targets
+                t[range(numTargets), tcls[layerIdx]] = cp
+                classLoss += BCEcls(predictionSubset[:, 5:], t)  # BCE
 
-            # Append targets to text file
-            # with open('targets.txt', 'a') as file:
-            #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
+        objectLoss += BCEobj(layerPrediction[..., 4], tobj)  # obj loss
 
-        lobj += BCEobj(pi[..., 4], tobj)  # obj loss
+    boxLoss *= model.hyp['giou']
+    objectLoss *= model.hyp['obj']
+    classLoss *= model.hyp['cls']
 
-    lbox *= h['giou']
-    lobj *= h['obj']
-    lcls *= h['cls']
-    if red == 'sum':
-        bs = tobj.shape[0]  # batch size
-        g = 3.0  # loss gain
-        lobj *= g / bs
-        if nt:
-            lcls *= g / nt / model.nc
-            lbox *= g / nt
-
-    loss = lbox + lobj + lcls
-    return loss, torch.cat((lbox, lobj, lcls, loss)).detach()
+    totLoss = boxLoss + objectLoss + classLoss
+    return totLoss, torch.cat((boxLoss, objectLoss, classLoss, totLoss)).detach()
 
 
 def build_targets(p, targets, model):
@@ -524,29 +460,6 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
             break  # time limit exceeded
 
     return output
-
-
-
-
-def strip_optimizer(f='weights/best.pt'):  # from utils.utils import *; strip_optimizer()
-    # Strip optimizer from *.pt files for lighter files (reduced by 2/3 size)
-    x = torch.load(f, map_location=torch.device('cpu'))
-    x['optimizer'] = None
-    print('Optimizer stripped from %s' % f)
-    torch.save(x, f)
-
-
-def create_backbone(f='weights/best.pt'):  # from utils.utils import *; create_backbone()
-    # create a backbone from a *.pt file
-    x = torch.load(f, map_location=torch.device('cpu'))
-    x['optimizer'] = None
-    x['training_results'] = None
-    x['epoch'] = -1
-    for p in x['model'].parameters():
-        p.requires_grad = True
-    s = 'weights/backbone.pt'
-    print('%s saved as %s' % (f, s))
-    torch.save(x, s)
 
 
 def fitness(x):
