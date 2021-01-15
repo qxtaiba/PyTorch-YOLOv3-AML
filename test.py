@@ -8,7 +8,7 @@ from utils.datasets import *
 from utils.utils import *
 
 
-def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_thres=0.6, augment=False, model=None, dataloader=None, multi_label=True):
+def test(cfg,data, weights=None, batchSize=16, imgSize=416, confidenceThreshold=0.001, iouThreshold=0.6, augment=False, model=None, dataloader=None, multi_label=True):
     
     # Initialize/load model and set device
     if model is None:
@@ -21,7 +21,7 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
             os.remove(f)
 
         # Initialize model
-        model = Darknet(cfg, imgsz)
+        model = Darknet(cfg, imgSize)
 
         # Load weights
         if weights.endswith('.pt'):  # pytorch format
@@ -55,13 +55,13 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
 
     # Dataloader
     if dataloader is None:
-        dataset = LoadImagesAndLabels(testPath, imgsz, batchSize, rect=True, pad=0.5)
+        dataset = LoadImagesAndLabels(testPath, imgSize, batchSize, rect=True, pad=0.5)
         batchSize = min(batchSize, len(dataset))
         dataloader = DataLoader(dataset, batchSize=batchSize, num_workers=min([os.cpu_count(), batchSize if batchSize > 1 else 0, 8]), pin_memory=True, collate_fn=dataset.collate_fn)
 
     seen = 0
     model.eval()
-    _ = model(torch.zeros((1, 3, imgsz, imgsz), device=device)) if device.type != 'cpu' else None  # run once
+    _ = model(torch.zeros((1, 3, imgSize, imgSize), device=device)) if device.type != 'cpu' else None  # run once
     s = ('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1')
     precision, recall, F1, meanPrecision, meanRecall, mAP, meanF1 = 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
@@ -83,7 +83,7 @@ def test(cfg,data, weights=None, batchSize=16, imgsz=416, conf_thres=0.001, iou_
                 loss += compute_loss(trainingOutput, targets, model)[1][:3]  # GIoU, obj, cls
 
             # Run NMS
-            output = non_max_suppression(inferenceOutput, conf_thres=conf_thres, iou_thres=iou_thres, multi_label=multi_label)
+            output = non_max_suppression(inferenceOutput, conf_thres=confidenceThreshold, iou_thres=iouThreshold, multi_label=multi_label)
 
         # Statistics per image
         for statIdx, pred in enumerate(output):

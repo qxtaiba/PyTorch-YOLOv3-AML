@@ -202,7 +202,7 @@ def train(trainHyperParams):
         isLastEpoch = epoch + 1 == numEpochs
         if isLastEpoch:  # Calculate mAP
             is_coco = any([x in dataFilePath for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
-            results, mAPs = test.test(configFilePath, dataFilePath, batchSize=trainBatchSize, imgsz=testImgSize, model=model, dataloader=testDataLoader, multi_label=numCompletedBatches > burnInVal)
+            results, mAPs = test.test(configFilePath, dataFilePath, batchSize=trainBatchSize, imgSize=testImgSize, model=model, dataloader=testDataLoader, multi_label=numCompletedBatches > burnInVal)
 
         # Write
         with open(resultOutput, 'a') as f:

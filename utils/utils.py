@@ -29,7 +29,7 @@ matplotlib.rc('font', **{'size': 11})
 cv2.setNumThreads(0)
 
 def xyxy2xywh(x):
-    # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
+    # Convert boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
     y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
     y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
@@ -39,7 +39,7 @@ def xyxy2xywh(x):
 
 
 def xywh2xyxy(x):
-    # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
+    # Convert boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
     y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
     y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
@@ -178,7 +178,7 @@ def bbox_iou(firstBox, secondBox, x1y1x2y2=True, GIoU=False):
         secondBoxX1, secondBoxX2 = secondBox[0] - secondBox[2] / 2, secondBox[0] + secondBox[2] / 2
         secondBoxY1, secondBoxY2 = secondBox[1] - secondBox[3] / 2, secondBox[1] + secondBox[3] / 2
 
-     # extract intersection rectangle coordinates
+    # extract intersection rectangle coordinates
     rectIntersectionX1, rectIntersectionY1  = torch.max(firstBoxX1, secondBoxX1), torch.max(firstBoxY1, secondBoxY1) 
     rectIntersectionX2, rectIntersectionY2 = torch.min(firstBoxX2, secondBoxX2), torch.min(firstBoxY2, secondBoxY2)
     
@@ -249,10 +249,6 @@ class FocalLoss(nn.Module):
 
     def forward(self, pred, true):
         loss = self.loss_fcn(pred, true)
-        # p_t = torch.exp(-loss)
-        # loss *= self.alpha * (1.000001 - p_t) ** self.gamma  # non-zero power for gradient stability
-
-        # TF implementation https://github.com/tensorflow/addons/blob/v0.7.1/tensorflow_addons/losses/focal_loss.py
         pred_prob = torch.sigmoid(pred)  # prob from logits
         p_t = true * pred_prob + (1 - true) * (1 - pred_prob)
         alpha_factor = true * self.alpha + (1 - true) * (1 - self.alpha)
@@ -267,7 +263,7 @@ class FocalLoss(nn.Module):
             return loss
 
 
-def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
+def smooth_BCE(eps=0.1):
     # return positive, negative label smoothing BCE targets
     return 1.0 - 0.5 * eps, 0.5 * eps
 
@@ -285,16 +281,11 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
     cp, cn = smooth_BCE(eps=0.0)
 
-    # focal loss
-    g = model.hyp['fl_gamma']  # focal loss gamma
-    if g > 0:
-        BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
-
     # per output
     cumNumTargets = 0  # targets
     for layerIdx, layerPrediction in enumerate(p):  # layer index, layer predictions
         b, a, gj, gi = indices[layerIdx]  # image, anchor, gridy, gridx
-        tobj = torch.zeros_like(layerPrediction[..., 0])  # target obj
+        targetObj = torch.zeros_like(layerPrediction[..., 0])  # target obj
 
         numTargets = b.shape[0]  # number of targets
         if numTargets:
@@ -309,64 +300,49 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             boxLoss += (1.0 - giou).mean()  # giou loss
 
             # Obj
-            tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
+            targetObj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(targetObj.dtype)  # giou ratio
 
             # Class
-            if model.nc > 1:  # cls loss (only if multiple classes)
-                t = torch.full_like(predictionSubset[:, 5:], cn)  # targets
-                t[range(numTargets), tcls[layerIdx]] = cp
-                classLoss += BCEcls(predictionSubset[:, 5:], t)  # BCE
+            t = torch.full_like(predictionSubset[:, 5:], cn)  # targets
+            t[range(numTargets), tcls[layerIdx]] = cp
+            classLoss += BCEcls(predictionSubset[:, 5:], t)  # BCE
 
-        objectLoss += BCEobj(layerPrediction[..., 4], tobj)  # obj loss
+        objectLoss += BCEobj(layerPrediction[..., 4], targetObj)  # obj loss
 
     boxLoss *= model.hyp['giou']
     objectLoss *= model.hyp['obj']
     classLoss *= model.hyp['cls']
 
     totLoss = boxLoss + objectLoss + classLoss
+
     return totLoss, torch.cat((boxLoss, objectLoss, classLoss, totLoss)).detach()
 
 
 def build_targets(p, targets, model):
     # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
-    nt = targets.shape[0]
+    numTargets = targets.shape[0]
     tcls, tbox, indices, anch = [], [], [], []
     gain = torch.ones(6, device=targets.device)  # normalized to gridspace gain
-    off = torch.tensor([[1, 0], [0, 1], [-1, 0], [0, -1]], device=targets.device).float()  # overlap offsets
 
-    style = None
-    multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
-    for i, j in enumerate(model.yolo_layers):
-        anchors = model.module.module_list[j].anchor_vec if multi_gpu else model.module_list[j].anchor_vec
-        gain[2:] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
-        na = anchors.shape[0]  # number of anchors
-        at = torch.arange(na).view(na, 1).repeat(1, nt)  # anchor tensor, same as .repeat_interleave(nt)
+    for idx, layer in enumerate(model.yolo_layers):
+        anchors = model.module_list[layer].anchor_vec
+        gain[2:] = torch.tensor(p[idx].shape)[[3, 2, 3, 2]]  # xyxy gain
+        numAnchors = anchors.shape[0]  # number of anchors
+        anchorTensor = torch.arange(numAnchors).view(numAnchors, 1).repeat(1, numTargets)  # anchor tensor, same as .repeat_interleave(nt)
 
         # Match targets to anchors
         a, t, offsets = [], targets * gain, 0
-        if nt:
+        if numTargets:
             # r = t[None, :, 4:6] / anchors[:, None]  # wh ratio
             # j = torch.max(r, 1. / r).max(2)[0] < model.hyp['anchor_t']  # compare
-            j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n) = wh_iou(anchors(3,2), gwh(n,2))
-            a, t = at[j], t.repeat(na, 1, 1)[j]  # filter
+            layer = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n) = wh_iou(anchors(3,2), gwh(n,2))
+            a, t = anchorTensor[layer], t.repeat(numAnchors, 1, 1)[layer]  # filter
 
             # overlaps
             gxy = t[:, 2:4]  # grid xy
             z = torch.zeros_like(gxy)
-            if style == 'rect2':
-                g = 0.2  # offset
-                j, k = ((gxy % 1. < g) & (gxy > 1.)).T
-                a, t = torch.cat((a, a[j], a[k]), 0), torch.cat((t, t[j], t[k]), 0)
-                offsets = torch.cat((z, z[j] + off[0], z[k] + off[1]), 0) * g
 
-            elif style == 'rect4':
-                g = 0.5  # offset
-                j, k = ((gxy % 1. < g) & (gxy > 1.)).T
-                l, m = ((gxy % 1. > (1 - g)) & (gxy < (gain[[2, 3]] - 1.))).T
-                a, t = torch.cat((a, a[j], a[k], a[l], a[m]), 0), torch.cat((t, t[j], t[k], t[l], t[m]), 0)
-                offsets = torch.cat((z, z[j] + off[0], z[k] + off[1], z[l] + off[2], z[m] + off[3]), 0) * g
-
-        # Define
+       # Define
         b, c = t[:, :2].long().T  # image, class
         gxy = t[:, 2:4]  # grid xy
         gwh = t[:, 4:6]  # grid wh
@@ -378,10 +354,6 @@ def build_targets(p, targets, model):
         tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
         anch.append(anchors[a])  # anchors
         tcls.append(c)  # class
-        if c.shape[0]:  # if any targets
-            assert c.max() < model.nc, 'Model accepts %g classes labeled from 0-%g, however you labelled a class %g. ' \
-                                       'See https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data' % (
-                                           model.nc, model.nc - 1, c.max())
 
     return tcls, tbox, indices, anch
 
@@ -418,12 +390,8 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
         box = xywh2xyxy(x[:, :4])
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        if multi_label:
-            i, j = (x[:, 5:] > conf_thres).nonzero().t()
-            x = torch.cat((box[i], x[i, j + 5].unsqueeze(1), j.float().unsqueeze(1)), 1)
-        else:  # best class only
-            conf, j = x[:, 5:].max(1)
-            x = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1)), 1)[conf > conf_thres]
+        i, j = (x[:, 5:] > conf_thres).nonzero().t()
+        x = torch.cat((box[i], x[i, j + 5].unsqueeze(1), j.float().unsqueeze(1)), 1)
 
         # Filter by class
         if classes:
@@ -596,11 +564,8 @@ def plot_results(start=0, stop=0, bucket='', id=()):  # from utils.utils import 
     ax = ax.ravel()
     s = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall',
          'val GIoU', 'val Objectness', 'val Classification', 'mAP@0.5', 'F1']
-    if bucket:
-        os.system('rm -rf storage.googleapis.com')
-        files = ['https://storage.googleapis.com/%s/results%g.txt' % (bucket, x) for x in id]
-    else:
-        files = glob.glob('results*.txt') + glob.glob('../../Downloads/results*.txt')
+
+    files = glob.glob('results*.txt') + glob.glob('../../Downloads/results*.txt')
     for f in sorted(files):
         try:
             results = np.loadtxt(f, usecols=[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin=2).T
