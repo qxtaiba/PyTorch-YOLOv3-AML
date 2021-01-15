@@ -10,7 +10,7 @@ def detect():
     out, source, weights = opt.output, opt.source, opt.weights
 
     # Initialize
-    device = torch_utils.select_device(device= opt.device)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     if os.path.exists(out):
         shutil.rmtree(out)  # delete output folder
