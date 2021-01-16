@@ -345,43 +345,64 @@ def compute_loss(predictions, targets, model):
 
     return totLoss, torch.cat((GIoUBoxLoss, objectLoss, classLoss, totLoss)).detach()
 
-
-def build_targets(p, targets, model):
-    # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+# build targets for compute_loss(), input targets(image,class,x,y,w,h)
+def build_targets(prediction, targets, model):
+    
+    # extract number of targets 
     numTargets = targets.shape[0]
-    tcls, tbox, indices, anch = [], [], [], []
-    gain = torch.ones(6, device = targets.device)  # normalized to gridspace gain
+    # init target classes, target boxes, target indices, target anchors to empty lists
+    targetClasses, targetBoxes, targetIndices, targetAnchors = [], [], [], []
+    # init gain to tensor filled with ones 
+    gain = torch.ones(6, device = targets.device)
 
+    # iterate through each layer in YOLO's layers
     for idx, layer in enumerate(model.yolo_layers):
+        # extract anchors in current layer 
         anchors = model.module_list[layer].anchorVector
-        gain[2:] = torch.tensor(p[idx].shape)[[3, 2, 3, 2]]  # xyxy gain
-        numAnchors = anchors.shape[0]  # number of anchors
-        anchorTensor = torch.arange(numAnchors).view(numAnchors, 1).repeat(1, numTargets)  # anchor tensor, same as .repeat_interleave(nt)
+        # extract number of anchors
+        numAnchors = anchors.shape[0]  
+        # create anchor tensor 
+        anchorTensor = torch.arange(numAnchors).view(numAnchors, 1).repeat(1, numTargets)  
+        # calculate xyxy gain
+        gain[2:] = torch.tensor(prediction[idx].shape)[[3, 2, 3, 2]] 
 
-        # Match targets to anchors
-        a, t, offsets = [], targets * gain, 0
+        # match targets to anchors
+        
+        # init layer anchor indices list 
+        layerAnchorIndices = []
+        # calculate scaled targets by multiplying by gain 
+        scaledTargets = targets*gain
+        # init offsets
+        offsets = 0
+
+        # check if number of targets is larger than zero 
         if numTargets:
-
-            layer = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n) = wh_iou(anchors(3,2), gwh(n,2))
-            a, t = anchorTensor[layer], t.repeat(numAnchors, 1, 1)[layer]  # filter
-
+            layer = wh_iou(anchors, scaledTargets[:, 4:6]) > model.hyp['iou_t']  
+            layerAnchorIndices, scaledTargets = anchorTensor[layer], scaledTargets.repeat(numAnchors, 1, 1)[layer]  #
             # overlaps
-            gxy = t[:, 2:4]  # grid xy
+            gridXY = scaledTargets[:, 2:4]  
 
-       # Define
-        b, c = t[:, :2].long().T  # image, class
-        gxy = t[:, 2:4]  # grid xy
-        gwh = t[:, 4:6]  # grid wh
-        gij = (gxy - offsets).long()
-        gi, gj = gij.T  # grid xy indices
+       # extract image index and image class
+        imageIndex, imageClass = scaledTargets[:, :2].long().T 
 
-        # Append
-        indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
-        tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
-        anch.append(anchors[a])  # anchors
-        tcls.append(c)  # class
+        # gridX, gridY, gridW, gridH respectively represent the x, y, w, h on the grid
+        # extract grid x,y values 
+        gridXY = scaledTargets[:, 2:4]  
+        # extract grid w,h values 
+        gridWH = scaledTargets[:, 4:6]  
 
-    return tcls, tbox, indices, anch
+        # extract grid i,j values (grid x,y indices)
+        # gridI, gridJ represent the integer part of x, y (which grid on the current feature map) - coords of upper left corner on feature map
+        gridIJ = (gridXY - offsets).long()
+        gridI, gridJ = gridIJ.T  
+
+        # append values accordingly to corresponding lists 
+        targetIndices.append((imageIndex, layerAnchorIndices, gridJ.clamp_(0, gain[3] - 1), gridI.clamp_(0, gain[2] - 1)))
+        targetBoxes.append(torch.cat((gridXY - gridIJ, gridWH), 1))  
+        targetAnchors.append(anchors[layerAnchorIndices]) 
+        targetClasses.append(imageClass)  
+
+    return targetClasses, targetBoxes, targetIndices, targetAnchors
 
 
 def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_label = True, classes = None, agnostic = False):
@@ -392,24 +413,22 @@ def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_lab
     """
 
     # Settings
-    merge = True  # merge for best mAP
-    min_wh, max_wh = 2, 4096  # (pixels) minimum and maximum box width and height
-    time_limit = 10.0  # seconds to quit after
+    minBoxWH, maxBoxWH = 2, 4096  # (pixels) minimum and maximum box width and height
 
-    t = time.time()
-    nc = prediction[0].shape[1] - 5  # number of classes
-    multi_label &= nc > 1  # multiple labels per box
+    currTime = time.time()
+    numClasses = prediction[0].shape[1] - 5  # number of classes
+    multi_label &= numClasses > 1  # multiple labels per box
     output = [None] * prediction.shape[0]
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
         x = x[x[:, 4] > conf_thres]  # confidence
-        x = x[((x[:, 2:4] > min_wh) & (x[:, 2:4] < max_wh)).all(1)]  # width-height
+        x = x[((x[:, 2:4] > minBoxWH) & (x[:, 2:4] < maxBoxWH)).all(1)]  # width-height
 
         # If none remain process next image
         if not x.shape[0]:
             continue
 
-        # Compute conf
+        # calculate confidence score by multiplying object confidence and class confidence together 
         x[..., 5:] *= x[..., 4:5]  # conf = obj_conf * cls_conf
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
@@ -430,9 +449,9 @@ def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_lab
 
         # Batched NMS
         c = x[:, 5] * 0 if agnostic else x[:, 5]  # classes
-        boxes, scores = x[:, :4].clone() + c.view(-1, 1) * max_wh, x[:, 4]  # boxes (offset by class), scores
+        boxes, scores = x[:, :4].clone() + c.view(-1, 1) * maxBoxWH, x[:, 4]  # boxes (offset by class), scores
         i = torchvision.ops.boxes.nms(boxes, scores, iou_thres)
-        if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
+        if (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
             try:  # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
                 iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
                 weights = iou * scores[None]  # box weights
@@ -442,7 +461,7 @@ def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_lab
                 pass
 
         output[xi] = x[i]
-        if (time.time() - t) > time_limit:
+        if (time.time() - currTime) > 10.0:
             break  # time limit exceeded
 
     return output
