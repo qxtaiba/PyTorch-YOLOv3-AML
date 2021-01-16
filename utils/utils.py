@@ -48,7 +48,7 @@ def xywh2xyxy(x):
 
 
 # rescale coordinates from first shape to that of second shape 
-def scale_coords(img1_shape, coords, img0_shape, ratio_pad = None):
+def scaleCoordinates(img1_shape, coords, img0_shape, ratio_pad = None):
     
     # check if ratioPad is set to None
     if ratio_pad is None:  
@@ -81,7 +81,7 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad = None):
 
 # here we want to create a precision-recall curve and compute the average precision for each class
 # F1 score is (harmonic mean of precision and recall)
-def ap_per_class(truePositives, objectnessVal, predictedClasses, targetClasses):
+def getAPClass(truePositives, objectnessVal, predictedClasses, targetClasses):
     """ Compute the average precision, given the recall and precision curves.
     Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
     # Arguments
@@ -143,7 +143,7 @@ def ap_per_class(truePositives, objectnessVal, predictedClasses, targetClasses):
 
             # calculate AP from recall-precision curve
             for j in range(truePositives.shape[1]):
-                AP[classIndex, j] = compute_ap(recallCurve[:, j], precisionCurve[:, j])
+                AP[classIndex, j] = getAP(recallCurve[:, j], precisionCurve[:, j])
 
     # calculate F1 score
     F1 = 2 * precision * recall / (precision + recall + constVal)
@@ -151,7 +151,7 @@ def ap_per_class(truePositives, objectnessVal, predictedClasses, targetClasses):
     return precision, recall, AP, F1, uniqueClasses.astype('int32')
 
 
-def compute_ap(recall, precision):
+def getAP(recall, precision):
     """ Compute the average precision, given the recall and precision curves.
     Source: https://github.com/rbgirshick/py-faster-rcnn.
     # Arguments
@@ -174,7 +174,7 @@ def compute_ap(recall, precision):
     return AP
 
 # returns the IoU of box1 to box2. box1 is 4, box2 is nx4
-def bbox_iou(firstBox, secondBox, x1y1x2y2 = True, GIoU = False):
+def boundingBoxIOU(firstBox, secondBox, x1y1x2y2 = True, GIoU = False):
     
     # transpose secondBox
     secondBox = secondBox.t()
@@ -231,7 +231,7 @@ def bbox_iou(firstBox, secondBox, x1y1x2y2 = True, GIoU = False):
     return iou
 
 
-def box_iou(box1, box2):
+def boxIOU(box1, box2):
     """
     Return intersection-over-union (Jaccard index) of boxes.
     Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
@@ -262,7 +262,7 @@ def box_iou(box1, box2):
     return intersectionArea /  unionArea
 
 # returns the nxm IoU matrix. wh1 is nx2, wh2 is mx2
-def wh_iou(firstWidthHeight, secondWidthHeight):
+def widthHeightIOU(firstWidthHeight, secondWidthHeight):
     
     # extract shapes 
     firstWidthHeight = firstWidthHeight[:, None]  # [N,1,2]
@@ -274,7 +274,7 @@ def wh_iou(firstWidthHeight, secondWidthHeight):
 
     return intersectionArea / unionArea 
 
-def compute_loss(predictions, targets, model):  
+def getLosses(predictions, targets, model):  
     # init float tensor depending on cuda availability 
     FloatTensor = torch.cuda.FloatTensor if predictions[0].is_cuda else torch.Tensor
 
@@ -286,7 +286,7 @@ def compute_loss(predictions, targets, model):
     objectLoss = FloatTensor([0])
 
     # calculate and extract targets 
-    tcls, tbox, indices, anchors = build_targets(predictions, targets, model)  
+    tcls, tbox, indices, anchors = buildTargets(predictions, targets, model)  
 
     # define criteria for BCE loss
     BCEcls = nn.BCEWithLogitsLoss(pos_weight = FloatTensor([model.hyp['cls_pw']]), reduction = 'mean')
@@ -318,7 +318,7 @@ def compute_loss(predictions, targets, model):
             # create predicted boz by concatenating predictionXY and predictionWH
             predictedBox = torch.cat((predictionXY, predictionWH), 1) 
             # calculate GIoU
-            GIoU = bbox_iou(predictedBox.t(), tbox[layerIdx], x1y1x2y2 = False, GIoU = True) 
+            GIoU = boundingBoxIOU(predictedBox.t(), tbox[layerIdx], x1y1x2y2 = False, GIoU = True) 
             # calculate GIoU box loss 
             GIoUBoxLoss += (1.0 - GIoU).mean()  
 
@@ -345,8 +345,8 @@ def compute_loss(predictions, targets, model):
 
     return totLoss, torch.cat((GIoUBoxLoss, objectLoss, classLoss, totLoss)).detach()
 
-# build targets for compute_loss(), input targets(image,class,x,y,w,h)
-def build_targets(prediction, targets, model):
+# build targets for getLosses(), input targets(image,class,x,y,w,h)
+def buildTargets(prediction, targets, model):
     
     # extract number of targets 
     numTargets = targets.shape[0]
@@ -377,7 +377,7 @@ def build_targets(prediction, targets, model):
 
         # check if number of targets is larger than zero 
         if numTargets:
-            layer = wh_iou(anchors, scaledTargets[:, 4:6]) > model.hyp['iou_t']  
+            layer = widthHeightIOU(anchors, scaledTargets[:, 4:6]) > model.hyp['iou_t']  
             layerAnchorIndices, scaledTargets = anchorTensor[layer], scaledTargets.repeat(numAnchors, 1, 1)[layer]  #
             # overlaps
             gridXY = scaledTargets[:, 2:4]  
@@ -405,203 +405,292 @@ def build_targets(prediction, targets, model):
     return targetClasses, targetBoxes, targetIndices, targetAnchors
 
 
-def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_label = True, classes = None, agnostic = False):
+def NMS(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_label = True, classes = None, agnostic = False):
     """
     Performs  Non-Maximum Suppression on inference results
     Returns detections with shape:
         nx6 (x1, y1, x2, y2, conf, cls)
     """
 
-    # Settings
-    minBoxWH, maxBoxWH = 2, 4096  # (pixels) minimum and maximum box width and height
-
-    currTime = time.time()
-    numClasses = prediction[0].shape[1] - 5  # number of classes
-    multi_label &= numClasses > 1  # multiple labels per box
+    # init minimum and maximum width and height 
+    minBoxWH, maxBoxWH = 2, 4096  
+    # extract number fo classes 
+    numClasses = prediction[0].shape[1] - 5
+    # multiple labels per box 
+    multi_label &= numClasses > 1
+    # init output list 
     output = [None] * prediction.shape[0]
-    for xi, x in enumerate(prediction):  # image index, image inference
-        # Apply constraints
-        x = x[x[:, 4] > conf_thres]  # confidence
-        x = x[((x[:, 2:4] > minBoxWH) & (x[:, 2:4] < maxBoxWH)).all(1)]  # width-height
 
-        # If none remain process next image
-        if not x.shape[0]:
+    # iterate through images in prediction
+    for imageIndex, imageInference in enumerate(prediction):  
+
+        # apply confidence thresholding constraints and filter out the images that have a confidence score below our min threshold value
+        imageInference = imageInference[imageInference[:, 4] > conf_thres]  
+        # apply widht-height thresholding constraints and filter out the images that do not fall within the range min-max
+        imageInference = imageInference[((imageInference[:, 2:4] > minBoxWH) & (imageInference[:, 2:4] < maxBoxWH)).all(1)]  # width-height
+
+        # check if there are no detections remaining after filtering
+        if not imageInference.shape[0]:
             continue
 
         # calculate confidence score by multiplying object confidence and class confidence together 
-        x[..., 5:] *= x[..., 4:5]  # conf = obj_conf * cls_conf
+        imageInference[..., 5:] *= imageInference[..., 4:5]  
 
-        # Box (center x, center y, width, height) to (x1, y1, x2, y2)
-        box = xywh2xyxy(x[:, :4])
+        # the bounding box attributes we have now are described by the center coordinates, as well as the height and width of the bounding box
+        # however it is easier to calculate IoU of two boxes, using coordinates of a pair of diagnal corners for each box. 
+        # so we want to  transform the (center x, center y, height, width) attributes of our boxes, to (top-left corner x, top-left corner y,  right-bottom corner x, right-bottom corner y) aka (x1,y1,x2,y2)
+        box = xywh2xyxy(imageInference[:, :4])
 
-        # Detections matrix nx6 (xyxy, conf, cls)
-        i, j = (x[:, 5:] > conf_thres).nonzero().t()
-        x = torch.cat((box[i], x[i, j + 5].unsqueeze(1), j.float().unsqueeze(1)), 1)
+        # create an Nx6 detection matrix (xyxy, conf, cls)
+        nmsIndices, j = (imageInference[:, 5:] > conf_thres).nonzero().t()
+        imageInference = torch.cat((box[nmsIndices], imageInference[nmsIndices, j + 5].unsqueeze(1), j.float().unsqueeze(1)), 1)
 
-        # Filter by class
+        # check if classes is not none 
         if classes:
-            x = x[(j.view(-1, 1) == torch.tensor(classes, device = j.device)).any(1)]
+            # filter by classes
+            imageInference = imageInference[(j.view(-1, 1) == torch.tensor(classes, device = j.device)).any(1)]
 
-        # If none remain process next image
-        n = x.shape[0]  # number of boxes
-        if not n:
+        # extract number of boxes
+        numBoxes = imageInference.shape[0]  
+
+        # check if there are no detections remaining after filtering
+        if not numBoxes:
             continue
 
         # Batched NMS
-        c = x[:, 5] * 0 if agnostic else x[:, 5]  # classes
-        boxes, scores = x[:, :4].clone() + c.view(-1, 1) * maxBoxWH, x[:, 4]  # boxes (offset by class), scores
-        i = torchvision.ops.boxes.nms(boxes, scores, iou_thres)
-        if (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
-            try:  # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
-                iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
-                weights = iou * scores[None]  # box weights
-                x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim = True)  # merged boxes
-            except:  # possible CUDA error https://github.com/ultralytics/yolov3/issues/1139
-                print(x, i, x.shape, i.shape)
+        
+        # extract number of classes 
+        c = imageInference[:, 5] * 0 if agnostic else imageInference[:, 5]  
+        # extract boxes offset by class and scores
+        boxes, scores = imageInference[:, :4].clone() + c.view(-1, 1) * maxBoxWH, imageInference[:, 4]  
+        # preform nms and store indices of elements to keep
+        nmsIndices = torchvision.ops.boxes.nms(boxes, scores, iou_thres)
+
+        # preform merge NMS using weighted mean 
+        if (1 < numBoxes < 3E3):  
+            try:  
+                # create iou matrix 
+                iou = boxIOU(boxes[nmsIndices], boxes) > iou_thres  # iou matrix
+                # calculate box weights 
+                weights = iou * scores[None]  
+                # merge boxes 
+                imageInference[nmsIndices, :4] = torch.mm(weights, imageInference[:, :4]).float() / weights.sum(1, keepdim = True)  
+            except: 
+                print(imageInference, nmsIndices, imageInference.shape, nmsIndices.shape)
                 pass
 
-        output[xi] = x[i]
-        if (time.time() - currTime) > 10.0:
-            break  # time limit exceeded
+        output[imageIndex] = imageInference[nmsIndices]
 
     return output
 
-def output_to_target(output, width, height):
+def convertToTarget(output, width, height):
     """
     Convert a YOLO model output to target format
     [batch_id, class_id, x, y, w, h, conf]
     """
+    # check if output is a PyTorch tensor and convert to numpy array 
     if isinstance(output, torch.Tensor):
         output = output.cpu().numpy()
-
+    
+    # init targets list 
     targets = []
-    for i, o in enumerate(output):
-        if o is not None:
-            for pred in o:
-                box = pred[:4]
-                w = (box[2] - box[0]) / width
-                h = (box[3] - box[1]) / height
-                x = box[0] / width + w / 2
-                y = box[1] / height + h / 2
-                conf = pred[4]
-                cls = int(pred[5])
-
-                targets.append([i, cls, x, y, w, h, conf])
+    
+    # iterate through outputs 
+    for index, currOutput in enumerate(output):
+        # check if current output is not empty 
+        if currOutput is not None:
+            # iterate through predictions in current output 
+            for prediction in currOutput:
+                # extract bounding box for current prediction
+                box = prediction[:4]
+                # extract width of bounding box 
+                widthBox = (box[2] - box[0]) / width
+                # extract height of bounding box 
+                heightBox = (box[3] - box[1]) / height
+                # extract x coordinate of bounding box
+                xBox = box[0] / width + widthBox / 2
+                # extract y coordinate of bounding box 
+                yBox = box[1] / height + heightBox / 2
+                # extract confidence score 
+                conf = prediction[4]
+                # extract box's predicted class 
+                classID = int(prediction[5])
+                # append to targets 
+                targets.append([index, classID, xBox, yBox, widthBox, heightBox, conf])
 
     return np.array(targets)
 
-
-def plot_one_box(x, img, color = None, label = None, line_thickness = None):
-    # Plots one bounding box on image img
-    tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
-    color = color or [random.randint(0, 255) for _ in range(3)]
-    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    cv2.rectangle(img, c1, c2, color, thickness = tl, lineType = cv2.LINE_AA)
-    if label:
-        tf = max(tl - 1, 1)  # font thickness
-        t_size = cv2.getTextSize(label, 0, fontScale = tl / 3, thickness = tf)[0]
-        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
-        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness = tf, lineType = cv2.LINE_AA)
-
-
-def plot_images(images, targets, paths = None, fname ='images.jpg', names = None, max_size = 640, max_subplots = 16):
-    tl = 3  # line thickness
-    tf = max(tl - 1, 1)  # font thickness
-    if os.path.isfile(fname):  # do not overwrite
+def plotImages(images, targets, paths = None, fname ='images.jpg', names = None, max_size = 640, max_subplots = 16):
+    
+    # init line thickness 
+    lineThickness = 3  
+    #  init font thickness
+    fontThickness = max(lineThickness - 1, 1)  
+    
+    # check if file arealdy exists and do not overrwrite 
+    if os.path.isfile(fname):  
         return None
-
+    # check if images are a PyTorch tensor and convert to numpy
     if isinstance(images, torch.Tensor):
         images = images.cpu().numpy()
-
+    # check if targets are a PyTorch tensor and convert to numpy 
     if isinstance(targets, torch.Tensor):
         targets = targets.cpu().numpy()
 
-    # un-normalise
+    # un-normalise images 
     if np.max(images[0]) <= 1:
         images *= 255
 
-    bs, _, h, w = images.shape  # batch size, _, height, width
-    bs = min(bs, max_subplots)  # limit plot images
-    ns = np.ceil(bs ** 0.5)  # number of subplots (square)
+    # extract batchSize, height, width from image shape 
+    batchSize, _, height, width = images.shape
+    # calculate batch size as min of batch size and the max number of subplots   
+    batchSize = min(batchSize, max_subplots)
+    # calculate number of square subplots 
+    numSubPlots = np.ceil(batchSize ** 0.5)  
 
-    # Check if we should resize
-    scale_factor = max_size / max(h, w)
-    if scale_factor < 1:
-        h = math.ceil(scale_factor * h)
-        w = math.ceil(scale_factor * w)
+    # calculate scale factor 
+    scaleFactor = max_size / max(height, width)
+    # check if resizing is necessary 
+    if scaleFactor < 1:
+        height = math.ceil(scaleFactor * height)
+        width = math.ceil(scaleFactor * width)
 
-    # Empty array for output
-    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype = np.uint8)
+    # init empty array for output
+    mosaic = np.full((int(numSubPlots * height), int(numSubPlots * width), 3), 255, dtype = np.uint8)
 
-    # Fix class - colour map
-    prop_cycle = plt.rcParams['axes.prop_cycle']
-    hex2rgb = lambda h: tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
-    color_lut = [hex2rgb(h) for h in prop_cycle.by_key()['color']]
+    # craete class - colour lookup table 
+    propertyCycle = plt.rcParams['axes.prop_cycle']
+    hex2rgb = lambda height: tuple(int(height[1 + index:1 + index + 2], 16) for index in (0, 2, 4))
+    colourLookUpTable = [hex2rgb(height) for height in propertyCycle.by_key()['color']]
 
-    for i, img in enumerate(images):
-        if i == max_subplots:  # if last batch has fewer images than we expect
+    # iterate through images
+    for index, img in enumerate(images):
+        
+        # check if we have reached max number of subplots 
+        if index == max_subplots:  
             break
-
-        block_x = int(w * (i // ns))
-        block_y = int(h * (i % ns))
-
+        
+        # calculate block x value
+        block_x = int(width * (index // numSubPlots))
+        # calculate block y value 
+        block_y = int(height * (index % numSubPlots))
+        # transpose image accordingly 
         img = img.transpose(1, 2, 0)
-        if scale_factor < 1:
-            img = cv2.resize(img, (w, h))
+        
+        # check if image needs to be resized 
+        if scaleFactor < 1:
+            img = cv2.resize(img, (width, height))
 
-        mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
-        if len(targets) > 0:
-            image_targets = targets[targets[:, 0] == i]
+        # assign image to mosaic 
+        mosaic[block_y:block_y + height, block_x:block_x + width, :] = img
+        
+        # calculate number of targets 
+        numTargets = len(targets) 
+
+        # check if number of targets is larger than zero 
+        if numTargets > 0:
+            # extract image targets
+            image_targets = targets[targets[:, 0] == index]
+            # extract bounding boxes 
             boxes = xywh2xyxy(image_targets[:, 2:6]).T
+            # extract classes 
             classes = image_targets[:, 1].astype('int')
-            gt = image_targets.shape[1] == 6  # ground truth if no conf column
-            conf = None if gt else image_targets[:, 6]  # check for confidence presence (gt vs pred)
+            # ground truth if no confidence column
+            groundTruth = image_targets.shape[1] == 6
+            # check for confidence precense 
+            conf = None if groundTruth else image_targets[:, 6]  
 
-            boxes[[0, 2]] *= w
+            boxes[[0, 2]] *= width
             boxes[[0, 2]] += block_x
-            boxes[[1, 3]] *= h
+            boxes[[1, 3]] *= height
             boxes[[1, 3]] += block_y
+
+            # iterate through boxes 
             for j, box in enumerate(boxes.T):
-                cls = int(classes[j])
-                color = color_lut[cls % len(color_lut)]
-                cls = names[cls] if names else cls
-                if gt or conf[j] > 0.3:  # 0.3 conf thresh
-                    label = '%s' % cls if gt else '%s %.1f' % (cls, conf[j])
-                    plot_one_box(box, mosaic, label = label, color = color, line_thickness = tl)
+                # extract image class 
+                imgCls = int(classes[j])
+                imgCls = names[imgCls] if names else imgCls
+                # extract colour from look-up table  
+                color = colourLookUpTable[imgCls % len(colourLookUpTable)]
+                
+                # confidence threshold 
+                if groundTruth or conf[j] > 0.3:
+                    # extract label and plot box 
+                    label = '%s' % imgCls if groundTruth else '%s %.1f' % (imgCls, conf[j])
+                    plotBox(box, mosaic, label = label, color = color, line_thickness = lineThickness)
 
-        # Draw image filename labels
+        # check if paths is not none and draw image filename labels
         if paths is not None:
-            label = os.path.basename(paths[i])[:40]  # trim to 40 char
-            t_size = cv2.getTextSize(label, 0, fontScale = tl / 3, thickness = tf)[0]
-            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness = tf,
-                        lineType = cv2.LINE_AA)
+            # trim label to fourty characters
+            label = os.path.basename(paths[index])[:40] 
+            # get text size 
+            textSize = cv2.getTextSize(label, 0, fontScale = lineThickness / 3, thickness = fontThickness)[0]
+            # add text to image 
+            cv2.putText(mosaic, label, (block_x + 5, block_y + textSize[1] + 5), 0, lineThickness / 3, [220, 220, 220], thickness = fontThickness, lineType = cv2.LINE_AA)
 
-        # Image border
-        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness = 3)
+        # create image border
+        cv2.rectangle(mosaic, (block_x, block_y), (block_x + width, block_y + height), (255, 255, 255), thickness = 3)
 
-    if fname is not None:
-        mosaic = cv2.resize(mosaic, (int(ns * w * 0.5), int(ns * h * 0.5)), interpolation = cv2.INTER_AREA)
-        cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))
+    # resize mosaic accordingly 
+    mosaic = cv2.resize(mosaic, (int(numSubPlots * width * 0.5), int(numSubPlots * height * 0.5)), interpolation = cv2.INTER_AREA)
+    # save mosaic  
+    cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))
 
     return mosaic
 
-def plot_results(start = 0, stop = 0, bucket ='', id =()):  
-    fig, ax = plt.subplots(2, 5, figsize =(12, 6), tight_layout = True)
-    ax = ax.ravel()
-    s = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall', 'val GIoU', 'val Objectness', 'val Classification', 'mAP@0.5', 'F1']
+# plots one bounding box on image img
+def plotBox(x, img, color = None, label = None, line_thickness = None):
+    
+    # init line thickness
+    lineThickness = line_thickness 
+    # start point and sned point for rectangle 
+    startPoint, endPoint = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    # draw rectangle on image 
+    cv2.rectangle(img, startPoint, endPoint, color, thickness = lineThickness, lineType = cv2.LINE_AA)
 
+    # check if label is not none 
+    if label:
+        # calculate font thickness 
+        fontThickness = max(lineThickness - 1, 1)  
+        # calculate text size 
+        textSize = cv2.getTextSize(label, 0, fontScale = lineThickness / 3, thickness = fontThickness)[0]
+        # cecalculate end point
+        endPoint = startPoint[0] + textSize[0], startPoint[1] - textSize[1] - 3
+        # draw rectangle for label and fill it 
+        cv2.rectangle(img, startPoint, endPoint, color, -1, cv2.LINE_AA)  
+        # place text in rectangle 
+        cv2.putText(img, label, (startPoint[0], startPoint[1] - 2), 0, lineThickness / 3, [225, 255, 255], thickness = fontThickness, lineType = cv2.LINE_AA)
+
+def plotResults(start = 0, stop = 0, bucket ='', id =()):  
+
+    # create list of graph titles 
+    graphTitles = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall', 'val GIoU', 'val Objectness', 'val Classification', 'mAP@0.5', 'F1']
+    # create figure, axis instance 
+    figure, axis = plt.subplots(2, 5, figsize =(12, 6), tight_layout = True)
+    axis = axis.ravel()
+    # extract files
     files = glob.glob('results*.txt') + glob.glob('../../Downloads/results*.txt')
-    for f in sorted(files):
-        results = np.loadtxt(f, usecols =[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin = 2).T
-        n = results.shape[1]  # number of rows
-        x = range(start, min(stop, n) if stop else n)
+    
+    # iterate through files
+    for file in sorted(files):
+        # load text from file and assign to results
+        results = np.loadtxt(file, usecols =[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin = 2).T
+        # extract number of rows
+        numRows = results.shape[1] 
+        x = numRows
+
         for i in range(10):
             y = results[i, x]
-            if i in [0, 1, 2, 5, 6, 7]:
-                y[y == 0] = np.nan  # dont show zero loss values
-            ax[i].plot(x, y, marker ='.', label = Path(f).stem, linewidth = 2, markersize = 8)
-            ax[i].set_title(s[i])
 
-    ax[1].legend()
-    fig.savefig('results.png', dpi = 200)
+            # do not show loss values of zero 
+            if i in [0, 1, 2, 5, 6, 7]:
+                y[y == 0] = np.nan
+            
+            # plot and set title 
+            axis[i].plot(x, y, marker ='.', label = Path(file).stem, linewidth = 2, markersize = 8)
+            axis[i].set_title(graphTitles[i])
+
+    # show legend 
+    axis[1].legend()
+    # save figure as png
+    figure.savefig('results.png', dpi = 200)

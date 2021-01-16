@@ -23,7 +23,7 @@ for orientation in ExifTags.TAGS.keys():
         break
 
 # return the exif-corrected PIL size
-def exif_size(img):
+def getEXIFsize(img):
 
     #extract image size
     shape = img.size
@@ -39,7 +39,7 @@ def exif_size(img):
 
     return shape
 
-def load_image(self, index):
+def loadImage(self, index):
 
     # extract image
     img = self.imgs[index]
@@ -50,7 +50,7 @@ def load_image(self, index):
     # extract height and width of image 
     originalHeight, originalWidth = img.shape[:2]  
     # resize factor so that we can resize image to imageSize
-    resizeFactor = self.imageSize / max(originalHeight, originalWidth)  # resize image to img_size
+    resizeFactor = self.imageSize / max(originalHeight, originalWidth)  # resize image to imageSize
     
     # always resize down, only resize up if training with augmentation
     if resizeFactor != 1:
@@ -96,7 +96,7 @@ def mosaic(self, index):
     
     for i, imageIndex in enumerate(indices):
         # load current image
-        img, (originalHeight, originalWidth), (resizedHeight, resizedWidth) = load_image(self, imageIndex)
+        img, (originalHeight, originalWidth), (resizedHeight, resizedWidth) = loadImage(self, imageIndex)
 
         if i == 0: # top left
             # create base image with 4 tiles
@@ -275,7 +275,7 @@ def randAffine(img, targets =(), degrees = 10, translate =.1, scale =.1, shear =
 
 
 class LoadImages: 
-    def __init__(self, path, img_size = 416):
+    def __init__(self, path, imageSize = 416):
         
         # init files list  
         files = []
@@ -294,7 +294,7 @@ class LoadImages:
         # extract number of images
         numImages = len(images)
         # init image size 
-        self.imgSize = img_size
+        self.imgSize = imageSize
         # inite files 
         self.files = images 
         # init number of files 
@@ -333,7 +333,7 @@ class LoadImages:
         return self.numFiles
 
 class LoadImagesAndLabels(Dataset):  
-    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, cache_images=False, single_cls=False, pad=0.0):
+    def __init__(self, path, imageSize=416, batch_size=16, augment=False, hyp=None, cache_images=False, single_cls=False, pad=0.0):
         
         # extract path 
         path = str(Path(path))  
@@ -360,7 +360,7 @@ class LoadImagesAndLabels(Dataset):
         # init image batch index 
         self.imageBatchIndex = imageBatchIndex  
         # init image size 
-        self.imageSize = img_size
+        self.imageSize = imageSize
         # init augment bool
         self.isAugment = augment
         # init hyperparameters
@@ -369,7 +369,7 @@ class LoadImagesAndLabels(Dataset):
         self.isMosaic = self.isAugment   
         
         # extract image shapes 
-        shapefile = [exif_size(Image.open(f)) for f in self.imgFiles]
+        shapefile = [getEXIFsize(Image.open(f)) for f in self.imgFiles]
         # init shapes array 
         self.shapes = np.array(shapefile, dtype=np.float64)
 
@@ -459,7 +459,7 @@ class LoadImagesAndLabels(Dataset):
 
         else:
             # load image 
-            img, (originalHeight, originalWeight), (resizedHeight, resizedWidth) = load_image(self, index)
+            img, (originalHeight, originalWeight), (resizedHeight, resizedWidth) = loadImage(self, index)
             # extract image size 
             shape = self.imgSize
             # letterbox image and extract the letterboxed image, the scale ratio used, and padding

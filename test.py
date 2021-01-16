@@ -26,7 +26,7 @@ def test(cfg,data, weights= None, batchSize = 16, imgSize = 416, confidenceThres
         # Load weights
         model.load_state_dict(torch.load(weights, map_location = device)['model'])
 
-        # Fuse
+        # 
         model.fuse()
         model.to(device)
 
@@ -38,7 +38,7 @@ def test(cfg,data, weights= None, batchSize = 16, imgSize = 416, confidenceThres
         verbose = False
 
     # Configure run
-    data = parse_data_cfg(data)
+    data = parseData(data)
     numClasses =  int(data['classes'])  # number of classes
     testPath = data['valid']  # path to test images
     with open(data['names'], 'r') as f:
@@ -77,10 +77,10 @@ def test(cfg,data, weights= None, batchSize = 16, imgSize = 416, confidenceThres
 
             # Compute loss
             if isTraining:  # if model has loss hyperparameters
-                loss += compute_loss(trainingOutput, targets, model)[1][:3]  # GIoU, obj, cls
+                loss += getLosses(trainingOutput, targets, model)[1][:3]  # GIoU, obj, cls
 
             # Run NMS
-            output = non_max_suppression(inferenceOutput, conf_thres= confidenceThreshold, iou_thres= iouThreshold, multi_label = multi_label)
+            output = NMS(inferenceOutput, conf_thres= confidenceThreshold, iou_thres= iouThreshold, multi_label = multi_label)
 
         # Statistics per image
         for statIdx, pred in enumerate(output):
@@ -119,7 +119,7 @@ def test(cfg,data, weights= None, batchSize = 16, imgSize = 416, confidenceThres
                     # Search for detections
                     if predictionIndices.shape[0]:
                         # Prediction to target ious
-                        ious, i = box_iou(pred[predictionIndices, :4], tbox[targetIndices]).max(1)  # best ious, indices
+                        ious, i = boxIOU(pred[predictionIndices, :4], tbox[targetIndices]).max(1)  # best ious, indices
 
                         # Append detections
                         for j in (ious > iouVector[0]).nonzero():
@@ -136,14 +136,14 @@ def test(cfg,data, weights= None, batchSize = 16, imgSize = 416, confidenceThres
         # Plot images
         if batchIdx < 1:
             f = 'test_batch%g_gt.jpg' % batchIdx  # filename
-            plot_images(imgs, targets, paths= paths, names= classNames, fname = f)  # ground truth
+            plotImages(imgs, targets, paths= paths, names= classNames, fname = f)  # ground truth
             f = 'test_batch%g_pred.jpg' % batchIdx
-            plot_images(imgs, output_to_target(output, width, height), paths= paths, names= classNames, fname = f)  # predictions
+            plotImages(imgs, convertToTarget(output, width, height), paths= paths, names= classNames, fname = f)  # predictions
 
     # Compute statistics
     testStatistics = [np.concatenate(x, 0) for x in zip(*testStatistics)]  # to numpy
     if len(testStatistics):
-        precision, recall, AP, F1, APClass = ap_per_class(*testStatistics)
+        precision, recall, AP, F1, APClass = getAPClass(*testStatistics)
         if niou > 1:
             precision, recall, AP, F1 = precision[:, 0], recall[:, 0], AP.mean(1), AP[:, 0]  # [P, R, AP@0.5:0.95, AP@0.5]
         meanPrecision, meanRecall, mAP, meanF1 = precision.mean(), recall.mean(), AP.mean(), F1.mean()
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     parser.add_argument('--data', type = str, default='data/coco2014.data', help ='*.data path')
     parser.add_argument('--weights', type = str, default='weights/yolov3-spp-ultralytics.pt', help ='weights path')
     parser.add_argument('--batch-size', type = int, default= 16, help ='size of each image batch')
-    parser.add_argument('--img-size', type = int, default= 512, help ='inference size (pixels)')
+    parser.add_argument('--imageSize', type = int, default= 512, help ='inference size (pixels)')
     parser.add_argument('--conf-thres', type = float, default= 0.001, help ='object confidence threshold')
     parser.add_argument('--iou-thres', type = float, default= 0.6, help ='IOU threshold for NMS')
     parser.add_argument('--device', default='', help ='device id (i.e. 0 or 0,1) or cpu')
@@ -182,4 +182,4 @@ if __name__ == '__main__':
     opt = parser.parse_args()
 
     # task = 'test', 'study', 'benchmark'
-    test(opt.cfg, opt.data, opt.weights, opt.batch_size, opt.img_size, opt.conf_thres, opt.iou_thres, opt.augment)
+    test(opt.cfg, opt.data, opt.weights, opt.batch_size, opt.imageSize, opt.conf_thres, opt.iou_thres, opt.augment)

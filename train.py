@@ -20,7 +20,7 @@ resultOutput = 'results.txt'
 trainHyperParams = {'giou': 3.54,  # giou loss gain
        'cls': 37.4,  # cls loss gain
        'cls_pw': 1.0,  # cls BCELoss positive_weight
-       'obj': 64.3,  # obj loss gain (*= img_size/320 if img_size != 320)
+       'obj': 64.3,  # obj loss gain (*= imageSize/320 if imageSize != 320)
        'obj_pw': 1.0,  # obj BCELoss positive_weight
        'iou_t': 0.20,  # iou training threshold
        'lr0': 0.01,  # initial learning rate (SGD = 5E-3, Adam = 5E-4)
@@ -51,7 +51,7 @@ def train(trainHyperParams):
     trainBatchSize = opt.batch_size
 
     # extract min image size, max image size, and test image size
-    minImgSize, maxImgSize, testImgSize = opt.img_size  
+    minImgSize, maxImgSize, testImgSize = opt.imageSize  
     
     if minImgSize == maxImgSize:
         minImgSize //= 1.5
@@ -73,7 +73,7 @@ def train(trainHyperParams):
     imgSize = maxImgSize
 
     # extract parsed data 
-    parsedData = parse_data_cfg(dataFilePath)
+    parsedData = parseData(dataFilePath)
 
     # extract training path
     trainingPath = parsedData['train']
@@ -88,7 +88,7 @@ def train(trainHyperParams):
     trainHyperParams['cls'] *= numClasses / 80  
 
     # attatch num classes to model
-    model.nc = numClasses  
+    model.numClasses = numClasses  
 
     # attatch hyperparametrs to model
     model.hyp = trainHyperParams  
@@ -168,7 +168,7 @@ def train(trainHyperParams):
         # init mean loss values to zero 
         meanLoss = torch.zeros(4).to(device)  
         
-        print(('\n' + '%10s' * 8) % ('Epoch', 'GPU_Mem', 'GIoU', 'Obj', 'Cls', 'Total', 'Targets', 'Img_Size'))
+        print(('\n' + '%10s' * 8) % ('Epoch', 'GPU_Mem', 'GIoU', 'Obj', 'Cls', 'Total', 'Targets', 'imageSize'))
         
         # init progress bar 
         progressBar = tqdm(enumerate(dataLoader), total = numBatches)  
@@ -198,7 +198,7 @@ def train(trainHyperParams):
             # multiscale
             if numCompletedBatches / accumulationInterval % 1 == 0:
 
-                #  adjust img_size (67% - 150%) every 1 batch                
+                #  adjust imageSize (67% - 150%) every 1 batch                
                 imgSize = random.randrange(minGridSize, maxGridSize + 1) * gridSize
 
             # calculate scale factor 
@@ -212,7 +212,7 @@ def train(trainHyperParams):
             pred = model(imgs)
 
             # calculate losses 
-            loss, lossItems = compute_loss(pred, targets, model)
+            loss, lossItems = getLosses(pred, targets, model)
 
             if not torch.isfinite(loss):
                 print('WARNING: non-finite loss, ending training ', lossItems)
@@ -236,7 +236,7 @@ def train(trainHyperParams):
             # plot results
             if numCompletedBatches < 1:
                 f = 'train_batch%g.jpg' % batchIdx
-                plot_images(images = imgs, targets = targets, paths = paths, fname = f)
+                plotImages(images = imgs, targets = targets, paths = paths, fname = f)
 
 
         # update scheduler
@@ -274,7 +274,7 @@ def train(trainHyperParams):
             del ckpt
 
 
-    plot_results()  # save as results.png
+    plotResults()  # save as results.png
     return results
 
 
@@ -284,8 +284,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type = int, default = 16)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--cfg', type = str, default ='cfg/yolov3.cfg', help ='*.cfg path')
     parser.add_argument('--data', type = str, default ='data/coco2017.data', help ='*.data path')
-    parser.add_argument('--multi-scale', action ='store_true', help ='adjust (67%% - 150%%) img_size every 10 batches')
-    parser.add_argument('--img-size', nargs ='+', type = int, default =[320, 640], help ='[min_train, max-train, test]')
+    parser.add_argument('--multi-scale', action ='store_true', help ='adjust (67%% - 150%%) imageSize every 10 batches')
+    parser.add_argument('--imageSize', nargs ='+', type = int, default =[320, 640], help ='[min_train, max-train, test]')
     parser.add_argument('--resume', action ='store_true', help ='resume training from last.pt')
     parser.add_argument('--name', default ='', help ='renames results.txt to results_name.txt if supplied')
     parser.add_argument('--device', default ='', help ='device id (i.e. 0 or 0,1 or cpu)')
@@ -294,7 +294,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # extend to 3 sizes (min, max, test)
-    opt.img_size.extend([opt.img_size[-1]] * (3 - len(opt.img_size)))
+    opt.imageSize.extend([opt.imageSize[-1]] * (3 - len(opt.imageSize)))
 
     train(trainHyperParams)  
 

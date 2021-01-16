@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-def parse_model_cfg(path):
+def parseModel(path):
     # init empty lists
     moduleDefinitions, validLines = [], []
     # read cfg file line by line and store it
@@ -54,7 +54,7 @@ def parse_model_cfg(path):
 
     return moduleDefinitions
 
-def parse_data_cfg(path):
+def parseData(path):
     # init output dictionary 
     options = dict()
 

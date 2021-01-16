@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def fuse_conv_and_bn(conv, bn):
+def fuseConvBnLayers(conv, bn):
 
     # disable gradient calculation
     with torch.no_grad():
@@ -37,7 +37,7 @@ def fuse_conv_and_bn(conv, bn):
 
         return fusedconv
 
-def scale_img(img, ratio = 1.0, same_shape = True):  # img(16,3,256,416), r = ratio
+def scaleImage(img, ratio = 1.0, same_shape = True):  # img(16,3,256,416), r = ratio
     
     # extract width and height 
     height, width = img.shape[2:]

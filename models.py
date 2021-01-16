@@ -1,7 +1,388 @@
 from utils.parse_config import *
 from utils.utils import *
 import torch.nn.functional as F
+    
+# constructs module list of layer blocks from module configuration in moduleDefinitions
+def createModules(moduleDefinitions, imgSize, cfg):
+    
+    # check if image size is an integer or tuple, and expand it if necessary 
+    imgSize = [imgSize] * 2 if isinstance(imgSize, int) else imgSize  
+    # extract hyperparameters from config file (unused)
+    trainingHyperparms = moduleDefinitions.pop(0)  
+    # init output filters
+    outputFilters = [3]  
+    # init module list 
+    moduleList = nn.ModuleList()
+    # init routing layers (list of layers that route to deeper layers)
+    routingLayers = []  
+    # init yolo index
+    yoloIndex = -1
 
+    # iterate through parsed cfg file and construct modules 
+    for idx, currModule in enumerate(moduleDefinitions):
+        modules = nn.Sequential()
+
+        if currModule['type'] == 'convolutional':
+            # extract batch normalize value 
+            isBatchNormalize = currModule['batch_normalize']
+            # extract filters value 
+            filters = currModule['filters']
+            # extract kernel size value
+            kernelSize = currModule['size']   
+            # extract stride value
+            stride = currModule['stride'] if 'stride' in currModule else (currModule['stride_y'], currModule['stride_x'])
+            # create convolutional layer 
+            convLayer = nn.Conv2d(in_channels = outputFilters[-1], out_channels = filters, kernel_size = kernelSize, stride = stride, padding = kernelSize // 2 if currModule['pad'] else 0, groups = currModule['groups'] if 'groups' in currModule else 1, bias = not isBatchNormalize)
+            # add convolutional layer 
+            modules.add_module('Conv2d', convLayer)
+
+            # if batch normalise 
+            if isBatchNormalize:
+                # create batch norm layer 
+                batchNormLayer = nn.BatchNorm2d(filters, momentum = 0.03, eps = 1E-4)
+                # add batch norm layer 
+                modules.add_module('BatchNorm2d', batchNormLayer)
+            
+            else:
+                # detection output that goes into YOLO layer 
+                routingLayers.append(idx)  
+
+            # leaky activation
+            if currModule['activation'] == 'leaky':  
+                # creat leaky layer 
+                leakyLayer = nn.LeakyReLU(0.1, inplace = True)
+                # add leaky layer 
+                modules.add_module('activation', leakyLayer)
+
+        elif currModule['type'] == 'upsample':
+            # create upsample layer 
+            modules = nn.Upsample(scale_factor = currModule['stride'])
+
+        elif currModule['type'] == 'route':  
+            # extract layers 
+            layers = currModule['layers']
+            # extract filters 
+            filters = sum([outputFilters[l + 1 if l > 0 else l] for l in layers])
+            # extend routing layers
+            routingLayers.extend([idx + l if l < 0 else l for l in layers])
+            # creat route layer using FeatureConcat class
+            modules = FeatureConcat(layers = layers)
+
+        elif currModule['type'] == 'shortcut':
+            # extract layers 
+            layers = currModule['from']
+            # extract filters 
+            filters = outputFilters[-1]
+            # extend routing layers 
+            routingLayers.extend([idx + l if l < 0 else l for l in layers])
+            # create shortcut layer using WeightedFeatureFusion class
+            modules = WeightedFeatureFusion(layers = layers, weight ='weights_type' in currModule)
+
+        elif currModule['type'] == 'yolo':
+            # increment yolo index 
+            yoloIndex += 1
+            # init stride list 
+            stride = [32, 16, 8]
+            # extract layers 
+            layers = currModule['from'] if 'from' in currModule else []
+            # create yolo layer 
+            modules = YOLOLayer(anchors = currModule['anchors'][currModule['mask']], numClasses = currModule['classes'],   imageSize = imgSize,   yoloLayerIndex = yoloIndex,   layers = layers, stride = stride[yoloIndex])
+
+            # init preceding Conv2d() bias 
+            j = layers[yoloIndex] if 'from' in currModule else -1
+            bias_ = moduleList[j][0].bias  
+            bias = bias_[:modules.numOutputs * modules.numAnchors].view(modules.numAnchors, -1)  
+            bias[:, 4] += -4.5  
+            bias[:, 5:] += math.log(0.6 / (modules.numClasses - 0.99))  
+            moduleList[j][0].bias = torch.nn.Parameter(bias_, requires_grad = bias_.requires_grad)
+
+        # append modules to module list 
+        moduleList.append(modules)
+        # append filters to output filters 
+        outputFilters.append(filters)
+    
+    # init binary routing layers 
+    binaryRoutingLayers = [False] * (idx + 1)
+    # iterate through routing layers and set those indices to true in binary routing layers list 
+    for idx in routingLayers:
+        binaryRoutingLayers[idx] = True
+
+    return moduleList, binaryRoutingLayers
+
+
+# parses and loads the weights stored in 'weights'
+def loadDarkNetWeights(self, weights, cutoff=-1):
+
+    # Establish cutoffs (load layers between 0 and cutoff. if cutoff = -1 all are loaded)
+    file = Path(weights).name
+    if file == 'darknet53.conv.74':
+        cutoff = 75
+    elif file == 'yolov3-tiny.conv.15':
+        cutoff = 15
+
+    # Read weights file
+    with open(weights, 'rb') as f:
+        self.version = np.fromfile(f, dtype=np.int32, count=3)  # (int32) version info: major, minor, revision
+        self.seen = np.fromfile(f, dtype=np.int64, count=1)  # (int64) number of images seen during training
+
+        weights = np.fromfile(f, dtype=np.float32)  # the rest are weights
+
+    ptr = 0
+    for idx, (moduleDef, module) in enumerate(zip(self.moduleDefinitions[:cutoff], self.module_list[:cutoff])):
+        if moduleDef['type'] == 'convolutional':
+            # extract conv
+            conv = module[0]
+
+            # load batch normalization bias, weights, running mean and running variance
+            if moduleDef['batch_normalize']:
+
+                # extract batch normalize 
+                batchNormalize = module[1]
+
+                # extract number of biases
+                numBiases = batchNormalize.bias.numel() 
+
+                # load bias
+                batchNormBias = torch.from_numpy(weights[ptr:ptr + numBiases])
+                
+                batchNormalize.bias.data.copy_(torch.from_numpy(weights[ptr:ptr + numBiases]).view_as(batchNormalize.bias))
+                ptr += numBiases
+
+                # load weight
+                batchNormWeight = torch.from_numpy(weights[ptr:ptr + numBiases])
+                
+                batchNormalize.weight.data.copy_(torch.from_numpy(weights[ptr:ptr + numBiases]).view_as(batchNormalize.weight))
+                ptr += numBiases
+
+                # load running mean 
+                batchNormRunMean = torch.from_numpy(weights[ptr:ptr + numBiases])
+
+                batchNormalize.running_mean.data.copy_(torch.from_numpy(weights[ptr:ptr + numBiases]).view_as(batchNormalize.running_mean))
+                ptr += numBiases
+
+                # load running var 
+                batchNormRunVar = torch.from_numpy(weights[ptr:ptr + numBiases])
+
+                batchNormalize.running_var.data.copy_(torch.from_numpy(weights[ptr:ptr + numBiases]).view_as(batchNormalize.running_var))
+                ptr += numBiases
+
+                # cast into dimensions of the model 
+                batchNormBias = batchNormBias.view_as(batchNormalize.bias)
+                batchNormWeight = batchNormWeight.view_as(batchNormalize.weight)
+                batchNormRunMean = batchNormRunMean.view_as(batchNormalize.running_mean)
+                batchNormRunVar = batchNormRunVar.view_as(batchNormalize.running_var)
+
+                # copy data to model 
+                batchNormalize.bias.data.copy_(batchNormBias)
+                batchNormalize.weight.data.copy_(batchNormWeight)
+                batchNormalize.running_mean.data.copy_(batchNormRunMean)
+                batchNormalize.running_var.data.copy_(batchNormRunVar)
+
+            else:
+                # extract number of biases 
+                numBiases = conv.bias.numel()
+                # load bias 
+                convBias = torch.from_numpy(weights[ptr:ptr + numBiases])
+                # cast into dimensions of model
+                convBias = convBias.view_as(conv.bias)
+                # copy data to model 
+                conv.bias.data.copy_(convBias)
+                # increment pointer 
+                ptr += numBiases
+
+            # Load conv. weights
+            # extract number of weights 
+            numWeights = conv.weight.numel()  
+            # load weights 
+            convWeights = torch.from_numpy(weights[ptr:ptr + numWeights])
+            # cast into dimensions of model 
+            convWeights = convWeights.view_as(conv.weight)
+            # copy data to model 
+            conv.weight.data.copy_(convWeights)
+            # increment pointer 
+            ptr += numWeights
+
+
+class YOLOLayer(nn.Module):
+    def __init__(self, anchors, numClasses, imageSize, yoloLayerIndex, layers, stride):
+        super(YOLOLayer, self).__init__()
+
+        # init class variables
+        self.anchors = torch.Tensor(anchors)
+        self.layerIndex = yoloLayerIndex  
+        self.layerIndices = layers  
+        self.layerStride = stride  
+        self.numOutputLayers = len(layers)  
+        self.numAnchors = len(anchors) 
+        self.numClasses = numClasses  
+        self.numOutputs = numClasses + 5  
+        self.numXGridPoints, self.numYGridPoints, self.numGridpoints = 0, 0, 0  
+        self.anchorVector = self.anchors / self.layerStride
+        self.anchorWH = self.anchorVector.view(1, self.numAnchors, 1, 1, 2)
+
+
+    def creatGrids(self, numGridPoints =(13, 13), device ='cpu'):
+        
+        # extract number of x, y gridpoints
+        self.numXGridPoints, self.numYGridPoints = numGridPoints  
+        # create gridpoints tensor
+        self.numGridpoints = torch.tensor(numGridPoints, dtype = torch.float)
+
+        # check if not currently training and build xy offsets 
+        if not self.training:
+            yv, xv = torch.meshgrid([torch.arange(self.numYGridPoints, device = device), torch.arange(self.numXGridPoints, device = device)])
+            self.grid = torch.stack((xv, yv), 2).view((1, 1, self.numYGridPoints, self.numXGridPoints, 2)).float()
+
+        # check if devices do not match and send to device 
+        if self.anchorVector.device != device:
+            self.anchorVector = self.anchorVector.to(device)
+            self.anchorWH = self.anchorWH.to(device)
+
+    def forward(self, prediction, out):
+        
+        # extract batch size, number of y gridpoints, number of x gridpoints
+        batchSize, _, numYGridPoints, numXGridPoints = prediction.shape  
+
+        # check if there is a mismatch in grid sizes and create grids
+        if (self.numXGridPointsGridPoints, self.numYGridPoints) != (numXGridPoints, numYGridPoints):
+            self.creatGrids((numXGridPoints, numYGridPoints), prediction.device)
+
+        # reshape prediction accordingly 
+        prediction = prediction.view(batchSize, self.numAnchors, self.numOutputs, self.numYGridPoints, self.numXGridPoints).permute(0, 1, 3, 4, 2).contiguous()  
+
+        # check if training is true
+        if self.training:
+            return prediction
+        
+        #inference 
+        else:
+            # extract inference output
+            inferenceOutput = prediction.clone() 
+            # xy calculation
+            inferenceOutput[..., :2] = torch.sigmoid(inferenceOutput[..., :2]) + self.grid  
+            # wh yolo method calculation
+            inferenceOutput[..., 2:4] = torch.exp(inferenceOutput[..., 2:4]) * self.anchorWH  
+            # multiply xywh by layer stride 
+            inferenceOutput[..., :4] *= self.layerStride
+            # pass inferenceOutput[..., 4:] through sigmoid function
+            torch.sigmoid_(inferenceOutput[..., 4:])
+
+            # view [1, 3, 13, 13, 85] as [1, 507, 85]
+            return inferenceOutput.view(batchSize, -1, self.numOutputs), prediction  
+
+
+# YOLOv3 object detection model
+class Darknet(nn.Module):
+
+    def __init__(self, cfg, imageSize =(416, 416), verbose = False):
+        super(Darknet, self).__init__()
+
+        # init class variables
+        self.moduleDefinitions = parseModel(cfg)
+        self.moduleList, self.routs = createModules(self.moduleDefinitions, imageSize, cfg)
+        self.yoloLayers = [i for i, m in enumerate(self.moduleList) if m.__class__.__name__ == 'YOLOLayer']  
+        self.version = np.array([0, 2, 5], dtype = np.int32)  
+        self.numImageSeen = np.array([0], dtype = np.int64)  
+
+    def forward(self, x, augment = False, verbose = False):
+        
+        # check if augment is false 
+        if not augment:
+            # pass x through Once
+            return self.forwardOnce(x)
+
+        else:  
+            # extract image size 
+            imageSize = x.shape[-2:]  
+            # init scales
+            scales = [0.83, 0.67] 
+            # init y list  
+            output = []
+
+            # iterate through x, flipped (left-right) and scaled x, scaled x 
+            for i, xi in enumerate((x, torch_utils.scaleImage(x.flip(3), scales[0], same_shape = False),  torch_utils.scaleImage(x, scales[1], same_shape = False))):
+                # pass value through forward once and append output
+                output.append(self.forwardOnce(xi)[0])
+
+            # scale
+            output[1][..., :4] /= scales[0]  
+            # flip left-right
+            output[1][..., 0] = imageSize[1] - output[1][..., 0]  
+            # scale
+            output[2][..., :4] /= scales[1]
+
+            # concatenate output
+            output = torch.cat(output, 1)
+
+            return output, None
+
+    def forwardOnce(self, inferenceOutput):
+
+        # init list for yolo output and output 
+        yoloLayerOutput, output = [], []
+
+        # iterate through modules in module list
+        for i, module in enumerate(self.moduleList):
+            # extract module class name 
+            name = module.__class__.__name__
+
+            # check if module is of type WeightedFeatureFusion or FeatureConcat
+            if name in ['WeightedFeatureFusion', 'FeatureConcat']: 
+                # extract inference output 
+                inferenceOutput = module(inferenceOutput, output)  
+            
+            # check if module is of type YOLOLayer
+            elif name == 'YOLOLayer':
+                # extract and append yolo output 
+                yoloLayerOutput.append(module(inferenceOutput, output))
+
+            else: 
+                # extract inference output
+                inferenceOutput = module(inferenceOutput)
+
+            # append inference output to output list 
+            output.append(inferenceOutput if self.routs[i] else [])
+
+        # check if training 
+        if self.training:
+            return yoloLayerOutput
+        
+        # inference or test
+        else: 
+            # extract inference and training output 
+            inferenceOutput, trainingOutput = zip(*yoloLayerOutput)  
+            # concatenate yolo outputs 
+            inferenceOutput = torch.cat(inferenceOutput, 1)  
+
+            return inferenceOutput, trainingOutput
+
+    # Fuse Conv2d + BatchNorm2d layers throughout model
+    def fuse(self):
+        # init instance of nn.ModuleList()
+        fuseList = nn.ModuleList()
+        
+        # iterate through child modules
+        for child in list(self.children())[0]:
+           
+            # check if child is of type nn.Sequential
+            if isinstance(child, nn.Sequential):
+           
+                # iterate throguh child
+                for index, val in enumerate(child):
+           
+                    # check if current val is of type nn.modules.batchnorm.BatchNorm2d
+                    if isinstance(val, nn.modules.batchnorm.BatchNorm2d):
+                        # fuse this bn layer with the previous conv2d layer
+                        conv = child[index - 1]
+                        fused = torch_utils.fuseConvBnLayers(conv, val)
+                        child = nn.Sequential(fused, *list(child.children())[index + 1:])
+                        break
+            
+            # append child to fused list 
+            fuseList.append(child)
+        # assign module list to fuse list 
+        self.moduleList = fuseList
+ 
 class FeatureConcat(nn.Module):
     def __init__(self, layers):
         super(FeatureConcat, self).__init__()
@@ -12,7 +393,8 @@ class FeatureConcat(nn.Module):
         return torch.cat([outputs[i] for i in self.layerIndices], 1) if self.isMultipleLayers else outputs[self.layerIndices[0]]
 
 
-class WeightedFeatureFusion(nn.Module):  # weighted sum of 2 or more layers https://arxiv.org/abs/1911.09070
+# weighted sum of 2 or more layers https://arxiv.org/abs/1911.09070
+class WeightedFeatureFusion(nn.Module):  
     def __init__(self, layers, weight = False):
         super(WeightedFeatureFusion, self).__init__()
         self.layerIndices = layers  
@@ -41,259 +423,3 @@ class WeightedFeatureFusion(nn.Module):  # weighted sum of 2 or more layers http
                 x = x + addFeatures[:, :inputChannels]
 
         return x
-
-def create_modules(module_defs, imgSize, cfg):
-    # Constructs module list of layer blocks from module configuration in module_defs
-
-    imgSize = [imgSize] * 2 if isinstance(imgSize, int) else imgSize  # expand if necessary
-    trainingHyperparms = module_defs.pop(0)  # cfg training hyperparams (unused)
-    outputFilters = [3]  # input channels
-    moduleList = nn.ModuleList()
-    routingLayers = []  # list of layers which rout to deeper layers
-    yoloIndex = -1
-
-    for idx, currModule in enumerate(module_defs):
-        modules = nn.Sequential()
-
-        if currModule['type'] == 'convolutional':
-            isBatchNormalize = currModule['batch_normalize']
-            filters = currModule['filters']
-            kernelSize = currModule['size']  # kernel size
-            stride = currModule['stride'] if 'stride' in currModule else (currModule['stride_y'], currModule['stride_x'])
-            
-            modules.add_module('Conv2d', nn.Conv2d(in_channels = outputFilters[-1], out_channels = filters, kernel_size = kernelSize, stride = stride, padding = kernelSize // 2 if currModule['pad'] else 0, groups = currModule['groups'] if 'groups' in currModule else 1, bias = not isBatchNormalize))
-
-            if isBatchNormalize:
-                modules.add_module('BatchNorm2d', nn.BatchNorm2d(filters, momentum = 0.03, eps = 1E-4))
-            else:
-                routingLayers.append(idx)  # detection output (goes into yolo layer)
-
-            if currModule['activation'] == 'leaky':  
-                modules.add_module('activation', nn.LeakyReLU(0.1, inplace = True))
-
-        elif currModule['type'] == 'upsample':
-            modules = nn.Upsample(scale_factor = currModule['stride'])
-
-        elif currModule['type'] == 'route':  # nn.Sequential() placeholder for 'route' layer
-            layers = currModule['layers']
-            filters = sum([outputFilters[l + 1 if l > 0 else l] for l in layers])
-            routingLayers.extend([idx + l if l < 0 else l for l in layers])
-            modules = FeatureConcat(layers = layers)
-
-        elif currModule['type'] == 'shortcut':  # nn.Sequential() placeholder for 'shortcut' layer
-            layers = currModule['from']
-            filters = outputFilters[-1]
-            routingLayers.extend([idx + l if l < 0 else l for l in layers])
-            modules = WeightedFeatureFusion(layers = layers, weight ='weights_type' in currModule)
-
-        elif currModule['type'] == 'yolo':
-            yoloIndex += 1
-            stride = [32, 16, 8]  # P5, P4, P3 strides
-            layers = currModule['from'] if 'from' in currModule else []
-            modules = YOLOLayer(anchors = currModule['anchors'][currModule['mask']],  # anchor list
-                                nc = currModule['classes'],  # number of classes
-                                img_size = imgSize,  # (416, 416)
-                                yolo_index = yoloIndex,  # 0, 1, 2...
-                                layers = layers,  # output layers
-                                stride = stride[yoloIndex])
-
-            # Initialize preceding Conv2d() bias (https://arxiv.org/pdf/1708.02002.pdf section 3.3)
-            j = layers[yoloIndex] if 'from' in currModule else -1
-
-            bias_ = moduleList[j][0].bias  # shape(255,)
-            bias = bias_[:modules.numOutputs * modules.numAnchors].view(modules.numAnchors, -1)  # shape(3,85)
-            bias[:, 4] += -4.5  # obj
-            bias[:, 5:] += math.log(0.6 / (modules.numClasses - 0.99))  # cls (sigmoid(p) = 1/nc)
-            moduleList[j][0].bias = torch.nn.Parameter(bias_, requires_grad = bias_.requires_grad)
-
-
-        # Register module list and number of output filters
-        moduleList.append(modules)
-        outputFilters.append(filters)
-
-    binaryRoutingLayers = [False] * (idx + 1)
-    for idx in routingLayers:
-        binaryRoutingLayers[idx] = True
-    return moduleList, binaryRoutingLayers
-
-
-class YOLOLayer(nn.Module):
-    def __init__(self, anchors, nc, img_size, yolo_index, layers, stride):
-        super(YOLOLayer, self).__init__()
-        self.anchors = torch.Tensor(anchors)
-        self.layerIndex = yolo_index  
-        self.layerIndices = layers  
-        self.layerStride = stride  
-        self.numOutputLayers = len(layers)  
-        self.numAnchors = len(anchors) 
-        self.numClasses = nc  
-        self.numOutputs = nc + 5  
-        self.numX, self.numY, self.numGridpoints = 0, 0, 0  
-        self.anchorVector = self.anchors / self.layerStride
-        self.anchorWH = self.anchorVector.view(1, self.numAnchors, 1, 1, 2)
-
-
-    def create_grids(self, ng =(13, 13), device ='cpu'):
-        self.numX, self.numY = ng  
-        self.numGridpoints = torch.tensor(ng, dtype = torch.float)
-
-        if not self.training:
-            yv, xv = torch.meshgrid([torch.arange(self.numY, device = device), torch.arange(self.numX, device = device)])
-            self.grid = torch.stack((xv, yv), 2).view((1, 1, self.numY, self.numX, 2)).float()
-
-        if self.anchorVector.device != device:
-            self.anchorVector = self.anchorVector.to(device)
-            self.anchorWH = self.anchorWH.to(device)
-
-    def forward(self, prediction, out):
-
-        bs, _, ny, nx = prediction.shape  # bs, 255, 13, 13
-        if (self.numX, self.numY) != (nx, ny):
-            self.create_grids((nx, ny), prediction.device)
-
-        prediction = prediction.view(bs, self.numAnchors, self.numOutputs, self.numY, self.numX).permute(0, 1, 3, 4, 2).contiguous()  
-
-        if self.training:
-            return prediction
-
-        else:
-            inferenceOutput = prediction.clone() 
-            inferenceOutput[..., :2] = torch.sigmoid(inferenceOutput[..., :2]) + self.grid  # xy
-            inferenceOutput[..., 2:4] = torch.exp(inferenceOutput[..., 2:4]) * self.anchorWH  # wh yolo method
-            inferenceOutput[..., :4] *= self.layerStride
-            torch.sigmoid_(inferenceOutput[..., 4:])
-            return inferenceOutput.view(bs, -1, self.numOutputs), prediction  # view [1, 3, 13, 13, 85] as [1, 507, 85]
-
-
-class Darknet(nn.Module):
-    # YOLOv3 object detection model
-
-    def __init__(self, cfg, img_size =(416, 416), verbose = False):
-        super(Darknet, self).__init__()
-
-        self.moduleDefinitions = parse_model_cfg(cfg)
-        self.moduleList, self.routs = create_modules(self.moduleDefinitions, img_size, cfg)
-        self.yoloLayers = get_yolo_layers(self)
-        self.version = np.array([0, 2, 5], dtype = np.int32)  
-        self.numImageSeen = np.array([0], dtype = np.int64)  
-
-    def forward(self, x, augment = False, verbose = False):
-
-        if not augment:
-            return self.forward_once(x)
-        else:  
-            imageSize = x.shape[-2:]  
-            scales = [0.83, 0.67]  # scales
-            y = []
-            for i, xi in enumerate((x, torch_utils.scale_img(x.flip(3), scales[0], same_shape = False),  torch_utils.scale_img(x, scales[1], same_shape = False))):
-                y.append(self.forward_once(xi)[0])
-
-            y[1][..., :4] /= scales[0]  # scale
-            y[1][..., 0] = imageSize[1] - y[1][..., 0]  # flip lr
-            y[2][..., :4] /= scales[1]  # scale
-
-            y = torch.cat(y, 1)
-
-            return y, None
-
-    def forward_once(self, inferenceOutput, augment = False):
-        imageSize = inferenceOutput.shape[-2:]  
-        yoloLayerOutput, output = [], []
-
-        for i, module in enumerate(self.moduleList):
-            name = module.__class__.__name__
-            if name in ['WeightedFeatureFusion', 'FeatureConcat']: 
-                inferenceOutput = module(inferenceOutput, output)  
-            elif name == 'YOLOLayer':
-                yoloLayerOutput.append(module(inferenceOutput, output))
-            else: 
-                inferenceOutput = module(inferenceOutput)
-
-            output.append(inferenceOutput if self.routs[i] else [])
-
-        if self.training:
-            return yoloLayerOutput
-        else: 
-            inferenceOutput, trainingOutput = zip(*yoloLayerOutput)  
-            inferenceOutput = torch.cat(inferenceOutput, 1)  
-            if augment:  
-                # de-augment results
-                inferenceOutput = torch.split(inferenceOutput, nb, dim=0)
-                # scale
-                inferenceOutput[1][..., :4] /= s[0]
-                # flip lr
-                inferenceOutput[1][..., 0] = imageSize[1] - inferenceOutput[1][..., 0] 
-                # scale
-                inferenceOutput[2][..., :4] /= s[1]  
-
-                inferenceOutput = torch.cat(inferenceOutput, 1)
-
-            return inferenceOutput, trainingOutput
-
-    def fuse(self):
-        # Fuse Conv2d + BatchNorm2d layers throughout model
-        fuseList = nn.ModuleList()
-        for a in list(self.children())[0]:
-            if isinstance(a, nn.Sequential):
-                for i, b in enumerate(a):
-                    if isinstance(b, nn.modules.batchnorm.BatchNorm2d):
-                        # fuse this bn layer with the previous conv2d layer
-                        conv = a[i - 1]
-                        fused = torch_utils.fuse_conv_and_bn(conv, b)
-                        a = nn.Sequential(fused, *list(a.children())[i + 1:])
-                        break
-            fuseList.append(a)
-        self.moduleList = fuseList
- 
-def get_yolo_layers(model):
-    return [i for i, m in enumerate(model.moduleList) if m.__class__.__name__ == 'YOLOLayer']  # [89, 101, 113]
-
-def load_darknet_weights(self, weights, cutoff=-1):
-    # Parses and loads the weights stored in 'weights'
-
-    # Establish cutoffs (load layers between 0 and cutoff. if cutoff = -1 all are loaded)
-    file = Path(weights).name
-    if file == 'darknet53.conv.74':
-        cutoff = 75
-    elif file == 'yolov3-tiny.conv.15':
-        cutoff = 15
-
-    # Read weights file
-    with open(weights, 'rb') as f:
-        self.version = np.fromfile(f, dtype=np.int32, count=3)  # (int32) version info: major, minor, revision
-        self.seen = np.fromfile(f, dtype=np.int64, count=1)  # (int64) number of images seen during training
-
-        weights = np.fromfile(f, dtype=np.float32)  # the rest are weights
-
-    ptr = 0
-    for idx, (moduleDef, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
-        if moduleDef['type'] == 'convolutional':
-            conv = module[0]
-            if moduleDef['batch_normalize']:
-                # Load BN bias, weights, running mean and running variance
-                bn = module[1]
-                nb = bn.bias.numel()  # number of biases
-                # Bias
-                bn.bias.data.copy_(torch.from_numpy(weights[ptr:ptr + nb]).view_as(bn.bias))
-                ptr += nb
-                # Weight
-                bn.weight.data.copy_(torch.from_numpy(weights[ptr:ptr + nb]).view_as(bn.weight))
-                ptr += nb
-                # Running Mean
-                bn.running_mean.data.copy_(torch.from_numpy(weights[ptr:ptr + nb]).view_as(bn.running_mean))
-                ptr += nb
-                # Running Var
-                bn.running_var.data.copy_(torch.from_numpy(weights[ptr:ptr + nb]).view_as(bn.running_var))
-                ptr += nb
-            else:
-                # Load conv. bias
-                nb = conv.bias.numel()
-                conv_b = torch.from_numpy(weights[ptr:ptr + nb]).view_as(conv.bias)
-                conv.bias.data.copy_(conv_b)
-                ptr += nb
-            # Load conv. weights
-            nw = conv.weight.numel()  # number of weights
-            conv.weight.data.copy_(torch.from_numpy(weights[ptr:ptr + nw]).view_as(conv.weight))
-            ptr += nw
-
-
