@@ -8,7 +8,7 @@ from utils.datasets import *
 from utils.utils import *
 
 
-def test(cfg,data, weights = None, batchSize = 16, imgSize = 416, confidenceThreshold = 0.001, iouThreshold = 0.6, augment = False, model = None, dataloader = None, multi_label = True):
+def test(cfg,data, weights= None, batchSize = 16, imgSize = 416, confidenceThreshold = 0.001, iouThreshold = 0.6, augment= False, model = None, dataloader= None, multi_label = True):
     
     # Initialize/load model and set device
     if model is None:
@@ -52,9 +52,9 @@ def test(cfg,data, weights = None, batchSize = 16, imgSize = 416, confidenceThre
 
     # Dataloader
     if dataloader is None:
-        dataset = LoadImagesAndLabels(testPath, imgSize, batchSize, rect = True, pad = 0.5)
+        dataset = LoadImagesAndLabels(testPath, imgSize, batchSize, pad = 0.5)
         batchSize = min(batchSize, len(dataset))
-        dataloader = DataLoader(dataset, batchSize = batchSize, num_workers = min([os.cpu_count(), batchSize if batchSize > 1 else 0, 8]), pin_memory = True, collate_fn = dataset.collate_fn)
+        dataloader = DataLoader(dataset, batchSize = batchSize, num_workers= min([os.cpu_count(), batchSize if batchSize > 1 else 0, 8]), pin_memory= True, collate_fn = dataset.collate_fn)
 
     seen = 0
     model.eval()
@@ -73,14 +73,14 @@ def test(cfg,data, weights = None, batchSize = 16, imgSize = 416, confidenceThre
         # Disable gradients
         with torch.no_grad():
             # Run model
-            inferenceOutput, trainingOutput = model(imgs, augment = augment)  # inference and training outputs
+            inferenceOutput, trainingOutput = model(imgs, augment= augment)  # inference and training outputs
 
             # Compute loss
             if isTraining:  # if model has loss hyperparameters
                 loss += compute_loss(trainingOutput, targets, model)[1][:3]  # GIoU, obj, cls
 
             # Run NMS
-            output = non_max_suppression(inferenceOutput, conf_thres = confidenceThreshold, iou_thres = iouThreshold, multi_label = multi_label)
+            output = non_max_suppression(inferenceOutput, conf_thres= confidenceThreshold, iou_thres= iouThreshold, multi_label = multi_label)
 
         # Statistics per image
         for statIdx, pred in enumerate(output):
@@ -136,9 +136,9 @@ def test(cfg,data, weights = None, batchSize = 16, imgSize = 416, confidenceThre
         # Plot images
         if batchIdx < 1:
             f = 'test_batch%g_gt.jpg' % batchIdx  # filename
-            plot_images(imgs, targets, paths = paths, names = classNames, fname = f)  # ground truth
+            plot_images(imgs, targets, paths= paths, names= classNames, fname = f)  # ground truth
             f = 'test_batch%g_pred.jpg' % batchIdx
-            plot_images(imgs, output_to_target(output, width, height), paths = paths, names = classNames, fname = f)  # predictions
+            plot_images(imgs, output_to_target(output, width, height), paths= paths, names= classNames, fname = f)  # predictions
 
     # Compute statistics
     testStatistics = [np.concatenate(x, 0) for x in zip(*testStatistics)]  # to numpy
@@ -170,14 +170,14 @@ def test(cfg,data, weights = None, batchSize = 16, imgSize = 416, confidenceThre
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog ='test.py')
-    parser.add_argument('--cfg', type = str, default ='cfg/yolov3-spp.cfg', help ='*.cfg path')
-    parser.add_argument('--data', type = str, default ='data/coco2014.data', help ='*.data path')
-    parser.add_argument('--weights', type = str, default ='weights/yolov3-spp-ultralytics.pt', help ='weights path')
-    parser.add_argument('--batch-size', type = int, default = 16, help ='size of each image batch')
-    parser.add_argument('--img-size', type = int, default = 512, help ='inference size (pixels)')
-    parser.add_argument('--conf-thres', type = float, default = 0.001, help ='object confidence threshold')
-    parser.add_argument('--iou-thres', type = float, default = 0.6, help ='IOU threshold for NMS')
-    parser.add_argument('--device', default ='', help ='device id (i.e. 0 or 0,1) or cpu')
+    parser.add_argument('--cfg', type = str, default='cfg/yolov3-spp.cfg', help ='*.cfg path')
+    parser.add_argument('--data', type = str, default='data/coco2014.data', help ='*.data path')
+    parser.add_argument('--weights', type = str, default='weights/yolov3-spp-ultralytics.pt', help ='weights path')
+    parser.add_argument('--batch-size', type = int, default= 16, help ='size of each image batch')
+    parser.add_argument('--img-size', type = int, default= 512, help ='inference size (pixels)')
+    parser.add_argument('--conf-thres', type = float, default= 0.001, help ='object confidence threshold')
+    parser.add_argument('--iou-thres', type = float, default= 0.6, help ='IOU threshold for NMS')
+    parser.add_argument('--device', default='', help ='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--augment', action ='store_true', help ='augmented inference')
     opt = parser.parse_args()
 

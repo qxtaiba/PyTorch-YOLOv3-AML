@@ -20,48 +20,58 @@ from tqdm import tqdm
 
 from . import torch_utils  
 
-# Set printoptions
+# set printoptions
 torch.set_printoptions(linewidth = 320, precision = 5, profile ='long')
 np.set_printoptions(linewidth = 320, formatter ={'float_kind': '{:11.5g}'.format})  # format short g, %precision = 5
 matplotlib.rc('font', **{'size': 11})
 
-# Prevent OpenCV from multithreading (to use PyTorch DataLoader)
+# prevent OpenCV from multithreading in order to use PyTorch DataLoader
 cv2.setNumThreads(0)
 
+# convert boxes from [x1, y1, x2, y2] to [x, y, w, h] where x1, y1 represents the top-left coordinates and x2, y2 represents the bottom-right
 def xyxy2xywh(x):
-    # Convert boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1 = top-left, xy2 = bottom-right
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
-    y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
-    y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
+    y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # center x coordinate
+    y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # center y coordinate
     y[:, 2] = x[:, 2] - x[:, 0]  # width
     y[:, 3] = x[:, 3] - x[:, 1]  # height
     return y
 
-
+# convert boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1 = top-left, xy2 = bottom-right
 def xywh2xyxy(x):
-    # Convert boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1 = top-left, xy2 = bottom-right
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
-    y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
-    y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
-    y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom right x
-    y[:, 3] = x[:, 1] + x[:, 3] / 2  # bottom right y
+    y[:, 0] = x[:, 0] - x[:, 2] / 2  # top-left x coordinate
+    y[:, 1] = x[:, 1] - x[:, 3] / 2  # top-left y coordinate
+    y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom-right x coordinate
+    y[:, 3] = x[:, 1] + x[:, 3] / 2  # bottom-right y coordinate
     return y
 
 
+# rescale coordinates from first shape to that of second shape 
 def scale_coords(img1_shape, coords, img0_shape, ratio_pad = None):
-    # Rescale coords (xyxy) from img1_shape to img0_shape
-    if ratio_pad is None:  # calculate from img0_shape
-        gain = max(img1_shape) / max(img0_shape)  # gain  = old / new
-        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
+    
+    # check if ratioPad is set to None
+    if ratio_pad is None:  
+        # calculate gain (old/new) from img0_shape
+        gain = max(img1_shape) / max(img0_shape) 
+        # calculate width and height padding from img0_shape
+        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2 
+    
     else:
+        # calculate gain from ratioPad
         gain = ratio_pad[0][0]
+        # calculate padding from ratioPad 
         pad = ratio_pad[1]
 
-    coords[:, [0, 2]] -= pad[0]  # x padding
-    coords[:, [1, 3]] -= pad[1]  # y padding
+    # extract x and y padding valyes 
+    xPadding, yPadding = pad[0], pad[1]
+
+    # rescale coordinates
+    coords[:, [0, 2]] -= xPadding 
+    coords[:, [1, 3]] -= yPadding  
     coords[:, :4] /= gain
 
-    # Clip bounding xyxy bounding boxes to image shape (height, width)
+    # clip bounding xyxy bounding boxes to image shape (height, width)
     coords[:, 0].clamp_(0, img0_shape[1])  # x1
     coords[:, 1].clamp_(0, img0_shape[0])  # y1
     coords[:, 2].clamp_(0, img0_shape[1])  # x2
@@ -69,8 +79,9 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad = None):
 
     return coords
 
-
-def ap_per_class(tp, conf, pred_cls, target_cls):
+# here we want to create a precision-recall curve and compute the average precision for each class
+# F1 score is (harmonic mean of precision and recall)
+def ap_per_class(truePositives, objectnessVal, predictedClasses, targetClasses):
     """ Compute the average precision, given the recall and precision curves.
     Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
     # Arguments
@@ -82,55 +93,62 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
         The average precision as computed in py-faster-rcnn.
     """
 
-    # Sort by objectness
-    i = np.argsort(-conf)
-    tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
 
-    # Find unique classes
-    unique_classes = np.unique(target_cls)
+    # sort by objectness and store sorted indices in objectnessSortIndices
+    objectnessSortIndices = np.argsort(-objectnessVal)
+    # sort truePositive using sorted indices
+    truePositives = truePositives[objectnessSortIndices]
+    # sort objectnessVal using sorted indices
+    objectnessVal = objectnessVal[objectnessSortIndices]
+    # sort predClasses using sorted indices
+    predictedClasses = predictedClasses[objectnessSortIndices]
+    # find all unique classes 
+    uniqueClasses = np.unique(targetClasses)
+    # init constant val
+    constVal = 1e-16
 
-    # Create Precision-Recall curve and compute AP for each class
-    pr_score = 0.1  # score to evaluate P and R https://github.com/ultralytics/yolov3/issues/898
-    s = [unique_classes.shape[0], tp.shape[1]]  # number class, number iou thresholds (i.e. 10 for mAP0.5...0.95)
-    ap, p, r = np.zeros(s), np.zeros(s), np.zeros(s)
-    for ci, c in enumerate(unique_classes):
-        i = pred_cls == c
-        n_gt = (target_cls == c).sum()  # Number of ground truth objects
-        n_p = i.sum()  # Number of predicted objects
+    # score to evaluate P and R https://github.com/ultralytics/yolov3/issues/898
+    precisionScore = 0.1  
+    shape = [uniqueClasses.shape[0], truePositives.shape[1]]  # number class, number iou thresholds (i.e. 10 for mAP0.5...0.95)
+    AP, precision, recall = np.zeros(shape), np.zeros(shape), np.zeros(shape)
 
-        if n_p == 0 or n_gt == 0:
+    # iterate through each class stored in unique classes
+    for classIndex, uniqueClass in enumerate(uniqueClasses):
+        objectnessSortIndices = predictedClasses == uniqueClass
+        # find number of ground truth objects
+        numGroundTruthObjects = (targetClasses == uniqueClass).sum() 
+        # find number of predicted objects 
+        numPredictedObjects = objectnessSortIndices.sum()  
+
+        # if there are no predicted objects AND no ground truth objects then we just skip this loop 
+        if numPredictedObjects == 0 or numGroundTruthObjects == 0:
             continue
+        
+        # otherwise if both number of predicted objects and number of ground truth objects are both non-zero
         else:
-            # Accumulate FPs and TPs
-            fpc = (1 - tp[i]).cumsum(0)
-            tpc = tp[i].cumsum(0)
+            # find the cumulative sum of false positives 
+            cumulativeFalsePositives = (1 - truePositives[objectnessSortIndices]).cumsum(0)
+            # find the cumulative sum of true positives
+            cumulativeTruePositives = truePositives[objectnessSortIndices].cumsum(0)
 
-            # Recall
-            recall = tpc / (n_gt + 1e-16)  # recall curve
-            r[ci] = np.interp(-pr_score, -conf[i], recall[:, 0])  # r at pr_score, negative x, xp because xp decreases
+            # create the recall curve and append it to list
+            recallCurve = cumulativeTruePositives / (numGroundTruthObjects + constVal)  
+            # calculate recall at precisionScore
+            recall[classIndex] = np.interp(-precisionScore, -objectnessVal[objectnessSortIndices], recallCurve[:, 0]) 
 
-            # Precision
-            precision = tpc / (tpc + fpc)  # precision curve
-            p[ci] = np.interp(-pr_score, -conf[i], precision[:, 0])  # p at pr_score
+            # create the precision curve and append it to list
+            precisionCurve = cumulativeTruePositives / (cumulativeTruePositives + cumulativeFalsePositives)  
+            # calculate precision at precisionScore
+            precision[classIndex] = np.interp(-precisionScore, -objectnessVal[objectnessSortIndices], precisionCurve[:, 0]) 
 
-            # AP from recall-precision curve
-            for j in range(tp.shape[1]):
-                ap[ci, j] = compute_ap(recall[:, j], precision[:, j])
+            # calculate AP from recall-precision curve
+            for j in range(truePositives.shape[1]):
+                AP[classIndex, j] = compute_ap(recallCurve[:, j], precisionCurve[:, j])
 
-            # Plot
-            # fig, ax = plt.subplots(1, 1, figsize =(5, 5))
-            # ax.plot(recall, precision)
-            # ax.set_xlabel('Recall')
-            # ax.set_ylabel('Precision')
-            # ax.set_xlim(0, 1.01)
-            # ax.set_ylim(0, 1.01)
-            # fig.tight_layout()
-            # fig.savefig('PR_curve.png', dpi = 300)
+    # calculate F1 score
+    F1 = 2 * precision * recall / (precision + recall + constVal)
 
-    # Compute F1 score (harmonic mean of precision and recall)
-    f1 = 2 * p * r / (p + r + 1e-16)
-
-    return p, r, ap, f1, unique_classes.astype('int32')
+    return precision, recall, AP, F1, uniqueClasses.astype('int32')
 
 
 def compute_ap(recall, precision):
@@ -143,36 +161,35 @@ def compute_ap(recall, precision):
         The average precision as computed in py-faster-rcnn.
     """
 
-    # Append sentinel values to beginning and end
+    # append sentinel values at the beginning and end of the recall curve and precision curve
     mrec = np.concatenate(([0.], recall, [min(recall[-1] + 1E-3, 1.)]))
     mpre = np.concatenate(([0.], precision, [0.]))
-
-    # Compute the precision envelope
+    # calculate the precision envelope
     mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+    # init a 101-point interp (COCO)
+    x = np.linspace(0, 1, 101)
+    # integrate area under envelope to calculate average precision
+    AP = np.trapz(np.interp(x, mrec, mpre), x)
 
-    # Integrate area under curve
-    method = 'interp'  # methods: 'continuous', 'interp'
-    if method == 'interp':
-        x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
-        ap = np.trapz(np.interp(x, mrec, mpre), x)  # integrate
-    else:  # 'continuous'
-        i = np.where(mrec[1:] != mrec[:-1])[0]  # points where x axis (recall) changes
-        ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])  # area under curve
+    return AP
 
-    return ap
-
-
+# returns the IoU of box1 to box2. box1 is 4, box2 is nx4
 def bbox_iou(firstBox, secondBox, x1y1x2y2 = True, GIoU = False):
-    # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
+    
+    # transpose secondBox
     secondBox = secondBox.t()
+    # init const val 
+    constVal = 1e-16
 
-    # Get the coordinates of bounding boxes
-    if x1y1x2y2:  # x1, y1, x2, y2 = box1
-        # Transform from center and width to exact coordinates
-        firstBoxX1, firstBoxY1, firstBoxX2, firstBoxY2 = firstBox[0], firstBox[1], firstBox[2], firstBox[3]
-        secondBoxX1, secondBoxY1, secondBoxX2, secondBoxY2 = secondBox[0], secondBox[1], secondBox[2], secondBox[3]
-    else:  # transform from xywh to xyxy
-        # Get the coordinates of bounding boxes
+    if x1y1x2y2:
+        # extract coordinates of bounding boxes - transform from center and width to exact coordinates
+        firstBoxX1, firstBoxY1 = firstBox[0], firstBox[1]
+        firstBoxX2, firstBoxY2 = firstBox[2], firstBox[3]
+        secondBoxX1, secondBoxY1 = secondBox[0], secondBox[1]
+        secondBoxX2, secondBoxY2 = secondBox[2], secondBox[3]
+
+    else:  
+        # extract coordinates of bounding boxes - transform from xywh to xyxy
         firstBoxX1, firstBoxX2 = firstBox[0] - firstBox[2] / 2, firstBox[0] + firstBox[2] / 2
         firstBoxY1, firstBoxY2 = firstBox[1] - firstBox[3] / 2, firstBox[1] + firstBox[3] / 2
         secondBoxX1, secondBoxX2 = secondBox[0] - secondBox[2] / 2, secondBox[0] + secondBox[2] / 2
@@ -182,30 +199,39 @@ def bbox_iou(firstBox, secondBox, x1y1x2y2 = True, GIoU = False):
     rectIntersectionX1, rectIntersectionY1  = torch.max(firstBoxX1, secondBoxX1), torch.max(firstBoxY1, secondBoxY1) 
     rectIntersectionX2, rectIntersectionY2 = torch.min(firstBoxX2, secondBoxX2), torch.min(firstBoxY2, secondBoxY2)
     
-    # Intersection area
+    # calculate intersection width
     intersectionWidth = (rectIntersectionX2 - rectIntersectionX1).clamp(0)
+    # calculate intersection height
     intersectionHeight = (rectIntersectionY2 - rectIntersectionY1).clamp(0)
-
+    # calculate intersection area 
     intersectionArea = intersectionWidth * intersectionHeight
 
-    # Union Area
+    # calculate width and height of first box 
     firstWidth, firstHeight = firstBoxX2 - firstBoxX1, firstBoxY2 - firstBoxY1
+    # calculate width and height of second box 
     secondWidth, secondHeight = secondBoxX2 - secondBoxX1, secondBoxY2 - secondBoxY1
-    unionArea = (firstWidth * firstHeight + 1e-16) + secondWidth * secondHeight - intersectionArea
+    # calculate union area 
+    unionArea = (firstWidth * firstHeight + constVal) + secondWidth * secondHeight - intersectionArea
 
-    iou = intersectionArea / unionArea  # iou
+    # calculate intersection-over-union (IoU) area
+    iou = intersectionArea / unionArea  
     
+    # check if GIoU is true 
     if GIoU:
-        smallestEnclosingWidth = torch.max(firstBoxX2, secondBoxX2) - torch.min(firstBoxX1, secondBoxX1)  # convex (smallest enclosing box) width
-        smallestEnclosingHeight = torch.max(firstBoxY2, secondBoxY2) - torch.min(firstBoxY1, secondBoxY1)  # convex height
-        smallestEnclosingArea = smallestEnclosingWidth * smallestEnclosingHeight + 1e-16  # convex area
-        return iou - (smallestEnclosingArea - unionArea) / smallestEnclosingArea  # GIoU
+        # extract smallest enclosing width (convex width)
+        smallestEnclosingWidth = torch.max(firstBoxX2, secondBoxX2) - torch.min(firstBoxX1, secondBoxX1)  
+        # extract smallest enclosing height (convex height)
+        smallestEnclosingHeight = torch.max(firstBoxY2, secondBoxY2) - torch.min(firstBoxY1, secondBoxY1) 
+        # calculate smallest enclosing area (convex araea) 
+        smallestEnclosingArea = smallestEnclosingWidth * smallestEnclosingHeight + constVal 
+        
+        # return GIoU
+        return iou - (smallestEnclosingArea - unionArea) / smallestEnclosingArea  
 
     return iou
 
 
 def box_iou(box1, box2):
-    # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
     """
     Return intersection-over-union (Jaccard index) of boxes.
     Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
@@ -216,70 +242,108 @@ def box_iou(box1, box2):
         iou (Tensor[N, M]): the NxM matrix containing the pairwise
             IoU values for every element in boxes1 and boxes2
     """
+    
+    # calculate width and height of first box
+    boxOneWidth = box1.t()[2] - box1.t()[0]
+    boxOneHeight = box1.t()[3] - box1.t()[1]
+    # calculate width and height of second box 
+    boxTwoWdith = box2.t()[2] - box2.t()[0]
+    boxTwoHeight = box2.t()[3] - box2.t()[1]
+    # calculate area of first box
+    areaOne = boxOneWidth * boxOneHeight
+    # calculate area of second box 
+    areaTwo = boxTwoWdith * boxTwoHeight
 
-    area1 = (box1.t()[2] - box1.t()[0]) * (box1.t()[3] - box1.t()[1])
-    area2 = (box2.t()[2] - box2.t()[0]) * (box2.t()[3] - box2.t()[1])
+    # calculate intersection area 
+    intersectionArea = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
+    # calculate union area 
+    unionArea = (areaOne[:, None] + areaTwo - intersectionArea)
 
-    # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
-    inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
-    return inter / (area1[:, None] + area2 - inter)  # iou = inter / (area1 + area2 - inter)
+    return intersectionArea /  unionArea
 
+# returns the nxm IoU matrix. wh1 is nx2, wh2 is mx2
+def wh_iou(firstWidthHeight, secondWidthHeight):
+    
+    # extract shapes 
+    firstWidthHeight = firstWidthHeight[:, None]  # [N,1,2]
+    secondWidthHeight = secondWidthHeight[None]  # [1,M,2]
+    # caclulate intersection area 
+    intersectionArea = torch.min(firstWidthHeight, secondWidthHeight).prod(2)  # [N,M]
+    # calculate union area 
+    unionArea = (firstWidthHeight.prod(2) + secondWidthHeight.prod(2) - intersectionArea) 
 
-def wh_iou(wh1, wh2):
-    # Returns the nxm IoU matrix. wh1 is nx2, wh2 is mx2
-    wh1 = wh1[:, None]  # [N,1,2]
-    wh2 = wh2[None]  # [1,M,2]
-    inter = torch.min(wh1, wh2).prod(2)  # [N,M]
-    return inter / (wh1.prod(2) + wh2.prod(2) - inter)  # iou = inter / (area1 + area2 - inter)
+    return intersectionArea / unionArea 
 
+def compute_loss(predictions, targets, model):  
+    # init float tensor depending on cuda availability 
+    FloatTensor = torch.cuda.FloatTensor if predictions[0].is_cuda else torch.Tensor
 
-def compute_loss(p, targets, model):  # predictions, targets, model
-    FloatTensor = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    classLoss, boxLoss, objectLoss = FloatTensor([0]), FloatTensor([0]), FloatTensor([0])
-    tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
+    # init class loss tensor to zeroes
+    classLoss = FloatTensor([0])
+    # init box loss tensor to zeroes 
+    GIoUBoxLoss = FloatTensor([0])
+    # init object loss tensor to zeroes 
+    objectLoss = FloatTensor([0])
 
-    # Define criteria
+    # calculate and extract targets 
+    tcls, tbox, indices, anchors = build_targets(predictions, targets, model)  
+
+    # define criteria for BCE loss
     BCEcls = nn.BCEWithLogitsLoss(pos_weight = FloatTensor([model.hyp['cls_pw']]), reduction = 'mean')
     BCEobj = nn.BCEWithLogitsLoss(pos_weight = FloatTensor([model.hyp['obj_pw']]), reduction = 'mean')
 
-    # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
-    cp, cn = 1.0 - 0.5 * 0.0, 0.5 * 0.0
+    # init total number of targets to zero 
+    cumNumTargets = 0  
+    
+    # iterate through each layer predection (output )
+    for layerIdx, layerPrediction in enumerate(predictions):
+        # extract image index, anchor, y grid coordinate, x grid coordinate 
+        imageIndex, anchor, gridY, gridX = indices[layerIdx]  
+        # init target objectness value to tensor of zeroes 
+        targetObj = torch.zeros_like(layerPrediction[..., 0])  
+        # extract number of targets 
+        numTargets = imageIndex.shape[0]  
 
-    # per output
-    cumNumTargets = 0  # targets
-    for layerIdx, layerPrediction in enumerate(p):  # layer index, layer predictions
-        b, a, gj, gi = indices[layerIdx]  # image, anchor, gridy, gridx
-        targetObj = torch.zeros_like(layerPrediction[..., 0])  # target obj
-
-        numTargets = b.shape[0]  # number of targets
+        # check if number of targets is larger than zero 
         if numTargets:
-            cumNumTargets += numTargets  # cumulative targets
-            predictionSubset = layerPrediction[b, a, gj, gi]  # prediction subset corresponding to targets
+            # increment cumulative number of targets with current number of targets 
+            cumNumTargets += numTargets  
+            # extract prediction subset corresponding to current targets
+            predictionSubset = layerPrediction[imageIndex, anchor, gridY, gridX]  
 
-            # GIoU
-            pxy = predictionSubset[:, :2].sigmoid()
-            pwh = predictionSubset[:, 2:4].exp().clamp(max = 1E3) * anchors[layerIdx]
-            pbox = torch.cat((pxy, pwh), 1)  # predicted box
-            giou = bbox_iou(pbox.t(), tbox[layerIdx], x1y1x2y2 = False, GIoU = True)  # giou(prediction, target)
-            boxLoss += (1.0 - giou).mean()  # giou loss
+            # extract prediction x, y coordinates 
+            predictionXY = predictionSubset[:, :2].sigmoid()
+            # extract prediction w,h values 
+            predictionWH = predictionSubset[:, 2:4].exp().clamp(max = 1E3) * anchors[layerIdx]
+            # create predicted boz by concatenating predictionXY and predictionWH
+            predictedBox = torch.cat((predictionXY, predictionWH), 1) 
+            # calculate GIoU
+            GIoU = bbox_iou(predictedBox.t(), tbox[layerIdx], x1y1x2y2 = False, GIoU = True) 
+            # calculate GIoU box loss 
+            GIoUBoxLoss += (1.0 - GIoU).mean()  
 
-            # Obj
-            targetObj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(targetObj.dtype)  # giou ratio
+            # calculate objectness value (GIoU ratio)
+            targetObj[imageIndex, anchor, gridY, gridX] = (1.0 - model.gr) + model.gr * GIoU.detach().clamp(0).type(targetObj.dtype)  
 
-            # Class
-            t = torch.full_like(predictionSubset[:, 5:], cn)  # targets
-            t[range(numTargets), tcls[layerIdx]] = cp
-            classLoss += BCEcls(predictionSubset[:, 5:], t)  # BCE
+            # calculate and sum BCE class loss
+            _targets = torch.full_like(predictionSubset[:, 5:], 0.0)  
+            _targets[range(numTargets), tcls[layerIdx]] = 1.0
+            classLoss += BCEcls(predictionSubset[:, 5:], _targets)  
 
-        objectLoss += BCEobj(layerPrediction[..., 4], targetObj)  # obj loss
+        # calculate and sum object loss 
+        objectLoss += BCEobj(layerPrediction[..., 4], targetObj) 
 
-    boxLoss *= model.hyp['giou']
+    # finalise values for GIoU box loss using hyperparameters
+    GIoUBoxLoss *= model.hyp['giou']
+    # finalise values for object loss using hyperparameters
     objectLoss *= model.hyp['obj']
+    # finalise values for class loss using hyperparameters
     classLoss *= model.hyp['cls']
 
-    totLoss = boxLoss + objectLoss + classLoss
+    # calculate total loss 
+    totLoss = GIoUBoxLoss + objectLoss + classLoss
 
-    return totLoss, torch.cat((boxLoss, objectLoss, classLoss, totLoss)).detach()
+    return totLoss, torch.cat((GIoUBoxLoss, objectLoss, classLoss, totLoss)).detach()
 
 
 def build_targets(p, targets, model):
@@ -297,8 +361,7 @@ def build_targets(p, targets, model):
         # Match targets to anchors
         a, t, offsets = [], targets * gain, 0
         if numTargets:
-            # r = t[None, :, 4:6] / anchors[:, None]  # wh ratio
-            # j = torch.max(r, 1. / r).max(2)[0] < model.hyp['anchor_t']  # compare
+
             layer = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n) = wh_iou(anchors(3,2), gwh(n,2))
             a, t = anchorTensor[layer], t.repeat(numAnchors, 1, 1)[layer]  # filter
 
@@ -360,17 +423,10 @@ def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_lab
         if classes:
             x = x[(j.view(-1, 1) == torch.tensor(classes, device = j.device)).any(1)]
 
-        # Apply finite constraint
-        # if not torch.isfinite(x).all():
-        #     x = x[torch.isfinite(x).all(1)]
-
         # If none remain process next image
         n = x.shape[0]  # number of boxes
         if not n:
             continue
-
-        # Sort by confidence
-        # x = x[x[:, 4].argsort(descending = True)]
 
         # Batched NMS
         c = x[:, 5] * 0 if agnostic else x[:, 5]  # classes
@@ -381,7 +437,6 @@ def non_max_suppression(prediction, conf_thres = 0.1, iou_thres = 0.6, multi_lab
                 iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
                 weights = iou * scores[None]  # box weights
                 x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim = True)  # merged boxes
-                # i = i[iou.sum(1) > 1]  # require redundancy
             except:  # possible CUDA error https://github.com/ultralytics/yolov3/issues/1139
                 print(x, i, x.shape, i.shape)
                 pass
@@ -462,7 +517,6 @@ def plot_images(images, targets, paths = None, fname ='images.jpg', names = None
 
     # Fix class - colour map
     prop_cycle = plt.rcParams['axes.prop_cycle']
-    # https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
     hex2rgb = lambda h: tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
     color_lut = [hex2rgb(h) for h in prop_cycle.by_key()['color']]
 
@@ -513,11 +567,10 @@ def plot_images(images, targets, paths = None, fname ='images.jpg', names = None
 
     return mosaic
 
-def plot_results(start = 0, stop = 0, bucket ='', id =()):  # from utils.utils import *; plot_results()
+def plot_results(start = 0, stop = 0, bucket ='', id =()):  
     fig, ax = plt.subplots(2, 5, figsize =(12, 6), tight_layout = True)
     ax = ax.ravel()
-    s = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall',
-         'val GIoU', 'val Objectness', 'val Classification', 'mAP@0.5', 'F1']
+    s = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall', 'val GIoU', 'val Objectness', 'val Classification', 'mAP@0.5', 'F1']
 
     files = glob.glob('results*.txt') + glob.glob('../../Downloads/results*.txt')
     for f in sorted(files):
@@ -528,11 +581,8 @@ def plot_results(start = 0, stop = 0, bucket ='', id =()):  # from utils.utils i
             y = results[i, x]
             if i in [0, 1, 2, 5, 6, 7]:
                 y[y == 0] = np.nan  # dont show zero loss values
-                # y /= y[0]  # normalize
             ax[i].plot(x, y, marker ='.', label = Path(f).stem, linewidth = 2, markersize = 8)
             ax[i].set_title(s[i])
-            # if i in [5, 6, 7]:  # share train and val loss y axes
-            #     ax[i].get_shared_y_axes().join(ax[i], ax[i - 5])
 
     ax[1].legend()
     fig.savefig('results.png', dpi = 200)

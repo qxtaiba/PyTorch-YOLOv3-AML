@@ -5,63 +5,42 @@ import torch.nn.functional as F
 class FeatureConcat(nn.Module):
     def __init__(self, layers):
         super(FeatureConcat, self).__init__()
-        self.layers = layers  # layer indices
-        self.multiple = len(layers) > 1  # multiple layers flag
+        self.layerIndices = layers  
+        self.isMultipleLayers = len(layers) > 1  
 
     def forward(self, x, outputs):
-        return torch.cat([outputs[i] for i in self.layers], 1) if self.multiple else outputs[self.layers[0]]
+        return torch.cat([outputs[i] for i in self.layerIndices], 1) if self.isMultipleLayers else outputs[self.layerIndices[0]]
 
 
 class WeightedFeatureFusion(nn.Module):  # weighted sum of 2 or more layers https://arxiv.org/abs/1911.09070
     def __init__(self, layers, weight = False):
         super(WeightedFeatureFusion, self).__init__()
-        self.layers = layers  # layer indices
-        self.weight = weight  # apply weights boolean
-        self.n = len(layers) + 1  # number of layers
+        self.layerIndices = layers  
+        self.isApplyWeights = weight  
+        self.numLayers = len(layers) + 1 
+
         if weight:
-            self.w = nn.Parameter(torch.zeros(self.n), requires_grad = True)  # layer weights
+            self.layerWeights = nn.Parameter(torch.zeros(self.numLayers), requires_grad = True)  
 
     def forward(self, x, outputs):
-        # Weights
-        if self.weight:
-            w = torch.sigmoid(self.w) * (2 / self.n)  # sigmoid weights (0-1)
+        if self.isApplyWeights:
+            w = torch.sigmoid(self.layerWeights) * (2 / self.numLayers)  
             x = x * w[0]
 
-        # Fusion
-        nx = x.shape[1]  # input channels
-        for i in range(self.n - 1):
-            a = outputs[self.layers[i]] * w[i + 1] if self.weight else outputs[self.layers[i]]  # feature to add
-            na = a.shape[1]  # feature channels
+        inputChannels = x.shape[1]  
+        
+        for i in range(self.numLayers - 1):
+            addFeatures = outputs[self.layerIndices[i]] * w[i + 1] if self.isApplyWeights else outputs[self.layerIndices[i]]  
+            featureChannles = addFeatures.shape[1]  
 
-            # Adjust channels
-            if nx == na:  # same shape
-                x = x + a
-            elif nx > na:  # slice input
-                x[:, :na] = x[:, :na] + a  # or a = nn.ZeroPad2d((0, 0, 0, 0, 0, dc))(a); x = x + a
-            else:  # slice feature
-                x = x + a[:, :nx]
+            if inputChannels == featureChannles:
+                x = x + addFeatures
+            elif inputChannels > featureChannles:  
+                x[:, :featureChannles] = x[:, :featureChannles] + addFeatures  
+            else:
+                x = x + addFeatures[:, :inputChannels]
 
         return x
-
-
-class MixConv2d(nn.Module):  # MixConv: Mixed Depthwise Convolutional Kernels https://arxiv.org/abs/1907.09595
-    def __init__(self, in_ch, out_ch, k =(3, 5, 7), stride = 1, dilation = 1, bias = True, method ='equal_params'):
-        super(MixConv2d, self).__init__()
-
-        groups = len(k)
-
-        # 'equal_params': equal parameter count per group
-        b = [out_ch] + [0] * groups
-        a = np.eye(groups + 1, groups, k =-1)
-        a -= np.roll(a, 1, axis = 1)
-        a *= np.array(k) ** 2
-        a[0] = 1
-        ch = np.linalg.lstsq(a, b, rcond = None)[0].round().astype(int)  # solve for equal weight indices, ax = b
-
-        self.m = nn.ModuleList([nn.Conv2d(in_channels = in_ch, out_channels = ch[g], kernel_size = k[g], stride = stride, padding = k[g] // 2, dilation = dilation, bias = bias) for g in range(groups)])
-
-    def forward(self, x):
-        return torch.cat([m(x) for m in self.m], 1)
 
 def create_modules(module_defs, imgSize, cfg):
     # Constructs module list of layer blocks from module configuration in module_defs
@@ -82,10 +61,7 @@ def create_modules(module_defs, imgSize, cfg):
             kernelSize = currModule['size']  # kernel size
             stride = currModule['stride'] if 'stride' in currModule else (currModule['stride_y'], currModule['stride_x'])
             
-            if isinstance(kernelSize, int):  # single-size conv
-                modules.add_module('Conv2d', nn.Conv2d(in_channels = outputFilters[-1], out_channels = filters, kernel_size = kernelSize, stride = stride, padding = kernelSize // 2 if currModule['pad'] else 0, groups = currModule['groups'] if 'groups' in currModule else 1, bias = not isBatchNormalize))
-            else:  # multiple-size conv
-                modules.add_module('MixConv2d', MixConv2d(in_ch = outputFilters[-1], out_ch = filters, k = kernelSize, stride = stride, bias = not isBatchNormalize))
+            modules.add_module('Conv2d', nn.Conv2d(in_channels = outputFilters[-1], out_channels = filters, kernel_size = kernelSize, stride = stride, padding = kernelSize // 2 if currModule['pad'] else 0, groups = currModule['groups'] if 'groups' in currModule else 1, bias = not isBatchNormalize))
 
             if isBatchNormalize:
                 modules.add_module('BatchNorm2d', nn.BatchNorm2d(filters, momentum = 0.03, eps = 1E-4))
@@ -145,23 +121,22 @@ class YOLOLayer(nn.Module):
     def __init__(self, anchors, nc, img_size, yolo_index, layers, stride):
         super(YOLOLayer, self).__init__()
         self.anchors = torch.Tensor(anchors)
-        self.index = yolo_index  # index of this layer in layers
-        self.layers = layers  # model output layer indices
-        self.stride = stride  # layer stride
-        self.numOutputLayers = len(layers)  # number of output layers (3)
-        self.numAnchors = len(anchors)  # number of anchors (3)
-        self.numClasses = nc  # number of classes (80)
-        self.numOutputs = nc + 5  # number of outputs (85)
-        self.numX, self.numY, self.numGridpoints = 0, 0, 0  # initialize number of x, y gridpoints
-        self.anchorVector = self.anchors / self.stride
+        self.layerIndex = yolo_index  
+        self.layerIndices = layers  
+        self.layerStride = stride  
+        self.numOutputLayers = len(layers)  
+        self.numAnchors = len(anchors) 
+        self.numClasses = nc  
+        self.numOutputs = nc + 5  
+        self.numX, self.numY, self.numGridpoints = 0, 0, 0  
+        self.anchorVector = self.anchors / self.layerStride
         self.anchorWH = self.anchorVector.view(1, self.numAnchors, 1, 1, 2)
 
 
     def create_grids(self, ng =(13, 13), device ='cpu'):
-        self.numX, self.numY = ng  # x and y grid size
+        self.numX, self.numY = ng  
         self.numGridpoints = torch.tensor(ng, dtype = torch.float)
 
-        # build xy offsets
         if not self.training:
             yv, xv = torch.meshgrid([torch.arange(self.numY, device = device), torch.arange(self.numX, device = device)])
             self.grid = torch.stack((xv, yv), 2).view((1, 1, self.numY, self.numX, 2)).float()
@@ -170,24 +145,24 @@ class YOLOLayer(nn.Module):
             self.anchorVector = self.anchorVector.to(device)
             self.anchorWH = self.anchorWH.to(device)
 
-    def forward(self, p, out):
+    def forward(self, prediction, out):
 
-        bs, _, ny, nx = p.shape  # bs, 255, 13, 13
+        bs, _, ny, nx = prediction.shape  # bs, 255, 13, 13
         if (self.numX, self.numY) != (nx, ny):
-            self.create_grids((nx, ny), p.device)
+            self.create_grids((nx, ny), prediction.device)
 
-        p = p.view(bs, self.numAnchors, self.numOutputs, self.numY, self.numX).permute(0, 1, 3, 4, 2).contiguous()  # prediction
+        prediction = prediction.view(bs, self.numAnchors, self.numOutputs, self.numY, self.numX).permute(0, 1, 3, 4, 2).contiguous()  
 
         if self.training:
-            return p
+            return prediction
 
-        else:  # inference
-            inferenceOutput = p.clone()  # inference output
+        else:
+            inferenceOutput = prediction.clone() 
             inferenceOutput[..., :2] = torch.sigmoid(inferenceOutput[..., :2]) + self.grid  # xy
             inferenceOutput[..., 2:4] = torch.exp(inferenceOutput[..., 2:4]) * self.anchorWH  # wh yolo method
-            inferenceOutput[..., :4] *= self.stride
+            inferenceOutput[..., :4] *= self.layerStride
             torch.sigmoid_(inferenceOutput[..., 4:])
-            return inferenceOutput.view(bs, -1, self.numOutputs), p  # view [1, 3, 13, 13, 85] as [1, 507, 85]
+            return inferenceOutput.view(bs, -1, self.numOutputs), prediction  # view [1, 3, 13, 13, 85] as [1, 507, 85]
 
 
 class Darknet(nn.Module):
@@ -196,61 +171,68 @@ class Darknet(nn.Module):
     def __init__(self, cfg, img_size =(416, 416), verbose = False):
         super(Darknet, self).__init__()
 
-        self.module_defs = parse_model_cfg(cfg)
-        self.module_list, self.routs = create_modules(self.module_defs, img_size, cfg)
-        self.yolo_layers = get_yolo_layers(self)
-        self.version = np.array([0, 2, 5], dtype = np.int32)  # (int32) version info: major, minor, revision
-        self.seen = np.array([0], dtype = np.int64)  # (int64) number of images seen during training
+        self.moduleDefinitions = parse_model_cfg(cfg)
+        self.moduleList, self.routs = create_modules(self.moduleDefinitions, img_size, cfg)
+        self.yoloLayers = get_yolo_layers(self)
+        self.version = np.array([0, 2, 5], dtype = np.int32)  
+        self.numImageSeen = np.array([0], dtype = np.int64)  
 
     def forward(self, x, augment = False, verbose = False):
 
         if not augment:
             return self.forward_once(x)
-        else:  # Augment images (inference and test only) https://github.com/ultralytics/yolov3/issues/931
-            img_size = x.shape[-2:]  # height, width
-            s = [0.83, 0.67]  # scales
+        else:  
+            imageSize = x.shape[-2:]  
+            scales = [0.83, 0.67]  # scales
             y = []
-            for i, xi in enumerate((x,
-                                    torch_utils.scale_img(x.flip(3), s[0], same_shape = False),  # flip-lr and scale
-                                    torch_utils.scale_img(x, s[1], same_shape = False),  # scale
-                                    )):
-                # cv2.imwrite('img%g.jpg' % i, 255 * xi[0].numpy().transpose((1, 2, 0))[:, :, ::-1])
+            for i, xi in enumerate((x, torch_utils.scale_img(x.flip(3), scales[0], same_shape = False),  torch_utils.scale_img(x, scales[1], same_shape = False))):
                 y.append(self.forward_once(xi)[0])
 
-            y[1][..., :4] /= s[0]  # scale
-            y[1][..., 0] = img_size[1] - y[1][..., 0]  # flip lr
-            y[2][..., :4] /= s[1]  # scale
+            y[1][..., :4] /= scales[0]  # scale
+            y[1][..., 0] = imageSize[1] - y[1][..., 0]  # flip lr
+            y[2][..., :4] /= scales[1]  # scale
 
             y = torch.cat(y, 1)
+
             return y, None
 
-    def forward_once(self, x):
-        img_size = x.shape[-2:]  # height, width
-        yolo_out, out = [], []
+    def forward_once(self, inferenceOutput, augment = False):
+        imageSize = inferenceOutput.shape[-2:]  
+        yoloLayerOutput, output = [], []
 
-
-        for i, module in enumerate(self.module_list):
+        for i, module in enumerate(self.moduleList):
             name = module.__class__.__name__
-            if name in ['WeightedFeatureFusion', 'FeatureConcat']:  # sum, concat
-                x = module(x, out)  # WeightedFeatureFusion(), FeatureConcat()
+            if name in ['WeightedFeatureFusion', 'FeatureConcat']: 
+                inferenceOutput = module(inferenceOutput, output)  
             elif name == 'YOLOLayer':
-                yolo_out.append(module(x, out))
-            else:  # run module directly, i.e. mtype = 'convolutional', 'upsample', 'maxpool', 'batchnorm2d' etc.
-                x = module(x)
+                yoloLayerOutput.append(module(inferenceOutput, output))
+            else: 
+                inferenceOutput = module(inferenceOutput)
 
-            out.append(x if self.routs[i] else [])
+            output.append(inferenceOutput if self.routs[i] else [])
 
-        if self.training:  # train
-            return yolo_out
-        else:  # inference or test
-            x, p = zip(*yolo_out)  # inference output, training output
-            x = torch.cat(x, 1)  # cat yolo outputs
-            return x, p
+        if self.training:
+            return yoloLayerOutput
+        else: 
+            inferenceOutput, trainingOutput = zip(*yoloLayerOutput)  
+            inferenceOutput = torch.cat(inferenceOutput, 1)  
+            if augment:  
+                # de-augment results
+                inferenceOutput = torch.split(inferenceOutput, nb, dim=0)
+                # scale
+                inferenceOutput[1][..., :4] /= s[0]
+                # flip lr
+                inferenceOutput[1][..., 0] = imageSize[1] - inferenceOutput[1][..., 0] 
+                # scale
+                inferenceOutput[2][..., :4] /= s[1]  
+
+                inferenceOutput = torch.cat(inferenceOutput, 1)
+
+            return inferenceOutput, trainingOutput
 
     def fuse(self):
         # Fuse Conv2d + BatchNorm2d layers throughout model
-        print('Fusing layers...')
-        fused_list = nn.ModuleList()
+        fuseList = nn.ModuleList()
         for a in list(self.children())[0]:
             if isinstance(a, nn.Sequential):
                 for i, b in enumerate(a):
@@ -260,11 +242,11 @@ class Darknet(nn.Module):
                         fused = torch_utils.fuse_conv_and_bn(conv, b)
                         a = nn.Sequential(fused, *list(a.children())[i + 1:])
                         break
-            fused_list.append(a)
-        self.module_list = fused_list
+            fuseList.append(a)
+        self.moduleList = fuseList
  
 def get_yolo_layers(model):
-    return [i for i, m in enumerate(model.module_list) if m.__class__.__name__ == 'YOLOLayer']  # [89, 101, 113]
+    return [i for i, m in enumerate(model.moduleList) if m.__class__.__name__ == 'YOLOLayer']  # [89, 101, 113]
 
 def load_darknet_weights(self, weights, cutoff=-1):
     # Parses and loads the weights stored in 'weights'
@@ -278,17 +260,16 @@ def load_darknet_weights(self, weights, cutoff=-1):
 
     # Read weights file
     with open(weights, 'rb') as f:
-        # Read Header https://github.com/AlexeyAB/darknet/issues/2914#issuecomment-496675346
         self.version = np.fromfile(f, dtype=np.int32, count=3)  # (int32) version info: major, minor, revision
         self.seen = np.fromfile(f, dtype=np.int64, count=1)  # (int64) number of images seen during training
 
         weights = np.fromfile(f, dtype=np.float32)  # the rest are weights
 
     ptr = 0
-    for i, (mdef, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
-        if mdef['type'] == 'convolutional':
+    for idx, (moduleDef, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
+        if moduleDef['type'] == 'convolutional':
             conv = module[0]
-            if mdef['batch_normalize']:
+            if moduleDef['batch_normalize']:
                 # Load BN bias, weights, running mean and running variance
                 bn = module[1]
                 nb = bn.bias.numel()  # number of biases
