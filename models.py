@@ -1,7 +1,86 @@
-from utils.parse_config import *
 from utils.utils import *
 import torch.nn.functional as F
+import os
+import numpy as np
+import math
+import time
+from copy import deepcopy
+import torch
+import torch.nn as nn
+
+def parseModel(path):
+    # init empty lists
+    moduleDefinitions, validLines = [], []
+    # read cfg file line by line and store it
+    allLines = open(path, 'r').read().split('\n')
     
+    for line in allLines:
+        # check if line is not empty and do not start with '#'
+        if line and not line.startswith("#"):
+            # append line and strip all fringe whitespace 
+            validLines.append(line.rstrip().lstrip())
+
+    for line in validLines:
+        # check if we are at the start of a new block 
+        isNewBlock = line.startswith('[')
+        
+        if isNewBlock:
+            # append and populate a dictionary to moduleDefinitions
+            moduleDefinitions.append({})
+            moduleDefinitions[-1]['type'] = line[1:-1].rstrip()
+            # check if module type is convolutional and add batch norm parameter
+            if moduleDefinitions[-1]['type'] == 'convolutional':
+                # pre-populate with zeros (may be overwritten later)
+                moduleDefinitions[-1]['batch_normalize'] = 0  
+        
+        else:
+            # extract key, value pair
+            key, val = line.split("=")
+            # strip whitespace 
+            key = key.rstrip()
+
+            # return a numpy array 
+            if key == 'anchors':  
+                moduleDefinitions[-1][key] = np.array([float(x) for x in val.split(',')]).reshape((-1, 2))
+            # return a regular array 
+            elif (key in ['from', 'layers', 'mask']):  
+                moduleDefinitions[-1][key] = [int(x) for x in val.split(',')]
+            # return a regular array 
+            elif (key == 'size' and ',' in val): 
+                moduleDefinitions[-1][key] = [int(x) for x in val.split(',')]
+
+            else:
+                # strip whitespace 
+                val = val.strip()
+                # return int/float 
+                if val.isnumeric():
+                    moduleDefinitions[-1][key] = int(val) if (int(val) - float(val)) == 0 else float(val)   # return int or float
+                # return string 
+                else:
+                    moduleDefinitions[-1][key] = val  
+
+    return moduleDefinitions
+
+def parseData(path):
+    # init output dictionary 
+    options = dict()
+
+    # open are read data file into lines 
+    with open(path, 'r') as f:
+        lines = f.readlines()
+
+    for line in lines:
+        # strip whitespace 
+        line = line.strip()
+        # check if line is empty or starts with a '#' (indicates a comment)
+        if line == '' or line.startswith('#'): continue
+        # extract key, value pair 
+        key, val = line.split('=')
+        # add key,value pair to dictionary 
+        options[key.strip()] = val.strip()
+
+    return options
+
 # constructs module list of layer blocks from module configuration in moduleDefinitions
 def createModules(moduleDefinitions, imgSize, cfg):
     
@@ -190,7 +269,7 @@ def loadDarkNetWeights(self, weights, cutoff=-1):
                 # increment pointer 
                 ptr += numBiases
 
-            # Load conv. weights
+            # load conv weights
             # extract number of weights 
             numWeights = conv.weight.numel()  
             # load weights 
@@ -368,14 +447,37 @@ class Darknet(nn.Module):
             if isinstance(child, nn.Sequential):
            
                 # iterate throguh child
-                for index, val in enumerate(child):
+                for index, bn in enumerate(child):
            
                     # check if current val is of type nn.modules.batchnorm.BatchNorm2d
-                    if isinstance(val, nn.modules.batchnorm.BatchNorm2d):
+                    if isinstance(bn, nn.modules.batchnorm.BatchNorm2d):
                         # fuse this bn layer with the previous conv2d layer
                         conv = child[index - 1]
-                        fused = torch_utils.fuseConvBnLayers(conv, val)
-                        child = nn.Sequential(fused, *list(child.children())[index + 1:])
+                        # disable gradient calculation
+                        with torch.no_grad():
+                            # crate fused convolutional layer 
+                            fusedconv = torch.nn.Conv2d(conv.in_channels, conv.out_channels, kernel_size = conv.kernel_size, stride = conv.stride, padding = conv.padding, bias = True)
+                            # extract convolutional weights
+                            convolutionalWeights = conv.weight.clone().view(conv.out_channels, -1)
+                            # extract batch normalization weights 
+                            batchNormWeights = torch.diag(bn.weight.div(torch.sqrt(bn.eps + bn.running_var)))
+                            # init and reshape fused convolutional layer weights 
+                            fusedconv.weight.copy_(torch.mm(batchNormWeights, convolutionalWeights).view(fusedconv.weight.size()))
+
+                            # check if convolutional layer bias is not none 
+                            if conv.bias is not None:
+                                # extract convolutional spatial bias 
+                                convolutionalBias = conv.bias
+                            else:
+                                # set to zero tensor 
+                                convolutionalBias = torch.zeros(conv.weight.size(0))
+                            
+                            # extract batch normalization spatial bias
+                            batchNormBias = bn.bias - bn.weight.mul(bn.running_mean).div(torch.sqrt(bn.running_var + bn.eps))
+                            # init and reshape fused convolutional layer bias
+                            fusedconv.bias.copy_(torch.mm(batchNormWeights, convolutionalBias.reshape(-1, 1)).reshape(-1) + batchNormBias)
+
+                        child = nn.Sequential(fusedconv, *list(child.children())[index + 1:])
                         break
             
             # append child to fused list 
