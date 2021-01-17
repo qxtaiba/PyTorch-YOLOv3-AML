@@ -41,16 +41,14 @@ def getEXIFsize(img):
 
 def loadImage(self, index):
 
-    # extract image
-    img = self.imgs[index]
     # extract path 
-    path = self.img_files[index]
+    path = self.imgFiles[index]
     # read image 
     img = cv2.imread(path)  
     # extract height and width of image 
     originalHeight, originalWidth = img.shape[:2]  
     # resize factor so that we can resize image to imageSize
-    resizeFactor = self.imageSize / max(originalHeight, originalWidth)  # resize image to imageSize
+    resizeFactor = self.imageSize / max(originalHeight, originalWidth)
     
     # always resize down, only resize up if training with augmentation
     if resizeFactor != 1:
@@ -64,7 +62,8 @@ def loadImage(self, index):
 
     return img, (originalHeight, originalWidth), (resizedHeight, resizedWidth) 
 
-def augment_hsv(img, hgain = 0.5, sgain = 0.5, vgain = 0.5):
+
+def augmentHSV(img, hgain = 0.5, sgain = 0.5, vgain = 0.5):
     
     # init random gains
     randomGains = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  
@@ -202,6 +201,8 @@ def letterbox(img, newShape = (416, 416), color = (114, 114, 114), auto = True, 
 
 def randAffine(img, targets =(), degrees = 10, translate =.1, scale =.1, shear = 10, border = 0):
 
+    constVal = 1e-16
+    
     # calculate height
     height = img.shape[0] + border * 2
     # calculate width 
@@ -264,9 +265,9 @@ def randAffine(img, targets =(), degrees = 10, translate =.1, scale =.1, shear =
         area0 = (targets[:, 3] - targets[:, 1]) * (targets[:, 4] - targets[:, 2])
         
         # calculate aspect ratio
-        aspectRatio = np.maximum(w/(h + 1e-16), h/(w + 1e-16))  
+        aspectRatio = np.maximum(w/(h + constVal), h/(w + constVal))  
         
-        i = (w > 4) & (h > 4) & (area / (area0 * scale + 1e-16) > 0.2) & (aspectRatio < 10)
+        i = (w > 4) & (h > 4) & (area / (area0 * scale + constVal) > 0.2) & (aspectRatio < 10)
 
         targets = targets[i]
         targets[:, 1:5] = xy[i]
@@ -295,7 +296,7 @@ class LoadImages:
         numImages = len(images)
         # init image size 
         self.imgSize = imageSize
-        # inite files 
+        # init files 
         self.files = images 
         # init number of files 
         self.numFiles = numImages 
@@ -487,7 +488,7 @@ class LoadImagesAndLabels(Dataset):
             if not self.isMosaic:
                 img, labels = randAffine(img, labels, degrees = hyp['degrees'], translate = hyp['translate'], scale = hyp['scale'], shear = hyp['shear'])
             # augment image/color space
-            augment_hsv(img, hgain = hyp['hsv_h'], sgain = hyp['hsv_s'], vgain = hyp['hsv_v'])
+            augmentHSV(img, hgain = hyp['hsv_h'], sgain = hyp['hsv_s'], vgain = hyp['hsv_v'])
         
         # check if labels is not empty 
         if len(labels) :
