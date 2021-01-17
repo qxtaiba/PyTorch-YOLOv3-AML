@@ -20,7 +20,7 @@ def fuseConvBnLayers(conv, bn):
         # extract batch normalization weights 
         batchNormWeights = torch.diag(bn.weight.div(torch.sqrt(bn.eps + bn.running_var)))
         # init and reshape fused convolutional layer weights 
-        fusedconv.weight.copy_(torch.mm(batchNormWeights, convolutionalWeights).view(fusedconv.weight.size())
+        fusedconv.weight.copy_(torch.mm(batchNormWeights, convolutionalWeights).view(fusedconv.weight.size()))
 
         # check if convolutional layer bias is not none 
         if conv.bias is not None:

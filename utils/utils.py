@@ -356,9 +356,9 @@ def buildTargets(prediction, targets, model):
     gain = torch.ones(6, device = targets.device)
 
     # iterate through each layer in YOLO's layers
-    for idx, layer in enumerate(model.yolo_layers):
+    for idx, layer in enumerate(model.yoloLayers):
         # extract anchors in current layer 
-        anchors = model.module_list[layer].anchorVector
+        anchors = model.moduleList[layer].anchorVector
         # extract number of anchors
         numAnchors = anchors.shape[0]  
         # create anchor tensor 
@@ -642,7 +642,7 @@ def plotImages(images, targets, paths = None, fname ='images.jpg', names = None,
 def plotBox(x, img, color = None, label = None, line_thickness = None):
     
     # init line thickness
-    lineThickness = line_thickness 
+    lineThickness = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1
     # start point and sned point for rectangle 
     startPoint, endPoint = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
     # draw rectangle on image 

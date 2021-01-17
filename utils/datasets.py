@@ -16,6 +16,7 @@ from tqdm import tqdm
 from utils.utils import xyxy2xywh, xywh2xyxy
 
 acceptedImageFormats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng']
+help_url = 'https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data'
 
 # find the orientation of the exif tag
 for orientation in ExifTags.TAGS.keys():
@@ -53,7 +54,7 @@ def loadImage(self, index):
     # always resize down, only resize up if training with augmentation
     if resizeFactor != 1:
         # interpolate image
-        interp = cv2.INTER_AREA if resizeFactor < 1 and not self.augment else cv2.INTER_LINEAR
+        interp = cv2.INTER_AREA if resizeFactor < 1 and not self.isAugment else cv2.INTER_LINEAR
         # resize image
         img = cv2.resize(img, (int(originalWidth * resizeFactor), int(originalHeight * resizeFactor)), interpolation = interp)
     
@@ -333,115 +334,365 @@ class LoadImages:
         # return number of files
         return self.numFiles
 
-class LoadImagesAndLabels(Dataset):  
-    def __init__(self, path, imageSize=416, batch_size=16, augment=False, hyp=None, cache_images=False, single_cls=False, pad=0.0):
+# class LoadImagesAndLabels(Dataset):  
+#     def __init__(self, path, imageSize=416, batch_size=16, augment=False, hyp=None, cache_images=False, single_cls=False, pad=0.0):
         
-        # extract path 
-        path = str(Path(path))  
-        # extract parent 
-        parent = str(Path(path).parent) + os.sep
+#         # extract path 
+#         path = str(Path(path))  
+#         # extract parent 
+#         parent = str(Path(path).parent) + os.sep
 
-        # read through file and adjust lines 
-        with open(path, 'r') as f:
-            f = f.read().splitlines()
-            f = [x.replace('./', parent) if x.startswith('./') else x for x in f] 
+#         # read through file and adjust lines 
+#         with open(path, 'r') as f:
+#             f = f.read().splitlines()
+#             f = [x.replace('./', parent) if x.startswith('./') else x for x in f] 
 
-        # extract image files if they are in the correct format 
-        self.imgFiles = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in acceptedImageFormats]
-        # extract label files
-        self.labelFiles = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt') for x in self.imgFiles]
+#         # extract image files if they are in the correct format 
+#         self.imgFiles = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in acceptedImageFormats]
+#         # extract label files
+#         self.labelFiles = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt') for x in self.imgFiles]
 
-        # extract number of files
-        numFiles = len(self.imgFiles)
-        # extract batch index
-        imageBatchIndex = np.floor(np.arange(numFiles) / batch_size).astype(np.int)  
+#         # extract number of files
+#         numFiles = len(self.imgFiles)
+#         # extract batch index
+#         imageBatchIndex = np.floor(np.arange(numFiles) / batch_size).astype(np.int)  
 
-        # init number of images 
-        self.numImages = numFiles  
-        # init image batch index 
-        self.imageBatchIndex = imageBatchIndex  
-        # init image size 
-        self.imageSize = imageSize
-        # init augment bool
+#         # init number of images 
+#         self.numImages = numFiles  
+#         # init image batch index 
+#         self.imageBatchIndex = imageBatchIndex  
+#         # init image size 
+#         self.imageSize = imageSize
+#         # init augment bool
+#         self.isAugment = augment
+#         # init hyperparameters
+#         self.hyperparameters = hyp
+#         # init mosaic bool
+#         self.isMosaic = self.isAugment   
+        
+#         # extract image shapes 
+#         shapefile = [getEXIFsize(Image.open(f)) for f in self.imgFiles]
+#         # init shapes array 
+#         self.shapes = np.array(shapefile, dtype=np.float64)
+
+#         # init image list 
+#         self.imgs = [None] * numFiles
+#         # init labels list
+#         self.labels = [np.zeros((0, 5), dtype=np.float32)] * numFiles
+#         # init bool to check if labels are already cached
+#         isLabelsLoaded = False
+#         # init numMissing, numFound, numDuplicate
+#         numMissing, numFound, numEmpty, numDuplicate = 0, 0, 0, 0  
+#         # init path to save/retrieve cached labels in .npy file
+#         cachedLabelsFile = str(Path(self.labelFiles[0]).parent) + '.npy' 
+
+#         # check if cached labels file exists
+#         if os.path.isfile(cachedLabelsFile):
+#             shapefile = cachedLabelsFile
+#             # load cached labels file
+#             x = np.load(cachedLabelsFile, allow_pickle=True)
+#             # check if number of cached labels is equal to total number of files/labels
+#             if len(x) == numFiles:
+#                 # assign labels
+#                 self.labels = x
+#                 # set isLabelsLoaded to true 
+#                 isLabelsLoaded = True
+#         else:
+#             # replace all instances of 'images' with 'labels' 
+#             shapefile = path.replace('images', 'labels')
+
+#         # create a progress bar and iterate through label files
+#         progressBar = tqdm(self.labelFiles)
+#         for index, file in enumerate(progressBar):
+
+#             # check if label is already loaded 
+#             if isLabelsLoaded:
+#                 # assign current indexed label
+#                 label = self.labels[index]
+
+#             else:
+#                 try:
+#                     # open file
+#                     with open(file, 'r') as f:
+#                         # parse through file and assign to label
+#                         label = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+#                 except:
+#                     # if except is triggered then this means we have a missing file/label and increment our count 
+#                     numMissing += 1  
+#                     continue
+            
+#             # check if label is empty
+#             if label.shape[0]:
+#                 # check if any duplicate rows
+#                 if np.unique(label, axis=0).shape[0] < label.shape[0]:  
+#                     # if there are duplcicate rows then we have a duplicate file/label and increment our count 
+#                     numDuplicate += 1  
+
+#                 # assing extracted label calue 
+#                 self.labels[index] = label
+#                 # increment our count of number of files found 
+#                 numFound += 1  
+
+#             else:
+#                 # increment our count of empty files
+#                 numEmpty += 1
+
+#             # add descriptive values to progress bar 
+#             progressBar.desc = 'caching labels %s (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (shapefile, numFound, numMissing, numEmpty, numDuplicate, numFiles)
+
+#         # if labels not cached already, save for next training
+#         if not isLabelsLoaded and numFiles > 1000:
+#             np.save(cachedLabelsFile, self.labels) 
+
+
+#     def __len__(self):
+#         return len(self.imgFiles)
+
+#     def __getitem__(self, index):
+        
+#         #extract hyperparameters 
+#         hyp = self.hyperparameters
+
+#         # check if isMosaic is true
+#         if self.isMosaic:
+#             # create mosaic and extract the tiled base image and corresponding labels
+#             img, labels = mosaic(self, index)
+#             shapes = None
+
+#         else:
+#             # load image 
+#             img, (originalHeight, originalWeight), (resizedHeight, resizedWidth) = loadImage(self, index)
+#             # extract image size 
+#             shape = self.imgSize
+#             # letterbox image and extract the letterboxed image, the scale ratio used, and padding
+#             img, ratio, pad = letterbox(img, shape, auto = False, scaleup = self.isAugment)
+#             # COCO mAP rescaling 
+#             shapes = (originalHeight, originalWeight), ((resizedHeight / originalHeight, resizedWidth / originalWeight), pad)  
+
+#             # init labels list
+#             labels = []
+#             # extract labels 
+#             x = self.labels[index]
+
+#             if x.size > 0:
+#                 # make a copy of extracted labels 
+#                 labels = x.copy()
+#                 # normalize xywh to xyxy format
+#                 labels[:, 1] = ratio[0] * resizedWidth * (x[:, 1] - x[:, 3] / 2) + pad[0]  
+#                 labels[:, 2] = ratio[1] * resizedHeight * (x[:, 2] - x[:, 4] / 2) + pad[1]  
+#                 labels[:, 3] = ratio[0] * resizedWidth * (x[:, 1] + x[:, 3] / 2) + pad[0]
+#                 labels[:, 4] = ratio[1] * resizedHeight * (x[:, 2] + x[:, 4] / 2) + pad[1]
+
+#         # check if isAugment is true 
+#         if self.isAugment:
+#             # check if isMosaic is true 
+#             if not self.isMosaic:
+#                 img, labels = randAffine(img, labels, degrees = hyp['degrees'], translate = hyp['translate'], scale = hyp['scale'], shear = hyp['shear'])
+#             # augment image/color space
+#             augmentHSV(img, hgain = hyp['hsv_h'], sgain = hyp['hsv_s'], vgain = hyp['hsv_v'])
+        
+#         # check if labels is not empty 
+#         if len(labels) :
+#             # convert xyxy to xywh
+#             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])
+#             # normalize height 
+#             labels[:, [2, 4]] /= img.shape[0]  
+#             # normalize width 
+#             labels[:, [1, 3]] /= img.shape[1]  
+
+#         # check if isAugment is true 
+#         if self.isAugment:
+#             # randomly preform left/right flip  on image
+#             if random.random() < 0.5:
+#                 img = np.fliplr(img)
+#                 # flip labels 
+#                 if len(labels) :
+#                     labels[:, 1] = 1 - labels[:, 1]
+
+#         # init output labels 
+#         outputLabels = torch.zeros((len(labels) , 6))
+#         # check if labels is not empty 
+#         if len(labels):
+#             # populate output labels 
+#             outputLabels[:, 1:] = torch.from_numpy(labels)
+
+#         # convert from BGR to RGB and reshape to 3x416x416
+#         img = img[:, :, ::-1].transpose(2, 0, 1)  
+#         img = np.ascontiguousarray(img)
+
+#         return torch.from_numpy(img), outputLabels, self.imgFiles[index], shapes
+
+#     @staticmethod
+#     def collate_fn(batch):
+#         # extract image, label, path, shapes 
+#         img, label, path, shapes = zip(*batch)  
+
+#         # iterate through labels 
+#         for i, l in enumerate(label):
+#             # prepend target image index 
+#             l[:, 0] = i
+
+#         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
+class LoadImagesAndLabels(Dataset):  # for training/testing
+    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
+                 cache_images=False, single_cls=False, pad=0.0):
+        try:
+            path = str(Path(path))  # os-agnostic
+            parent = str(Path(path).parent) + os.sep
+            if os.path.isfile(path):  # file
+                with open(path, 'r') as f:
+                    f = f.read().splitlines()
+                    f = [x.replace('./', parent) if x.startswith('./') else x for x in f]  # local to global path
+            elif os.path.isdir(path):  # folder
+                f = glob.iglob(path + os.sep + '*.*')
+            else:
+                raise Exception('%s does not exist' % path)
+            self.imgFiles = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in acceptedImageFormats]
+        except:
+            raise Exception('Error loading data from %s. See %s' % (path, help_url))
+
+        n = len(self.imgFiles)
+        assert n > 0, 'No images found in %s. See %s' % (path, help_url)
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        nb = bi[-1] + 1  # number of batches
+
+        self.n = n  # number of images
+        self.batch = bi  # batch index of image
+        self.imageSize = img_size
         self.isAugment = augment
-        # init hyperparameters
-        self.hyperparameters = hyp
-        # init mosaic bool
-        self.isMosaic = self.isAugment   
-        
-        # extract image shapes 
-        shapefile = [getEXIFsize(Image.open(f)) for f in self.imgFiles]
-        # init shapes array 
-        self.shapes = np.array(shapefile, dtype=np.float64)
+        self.hyp = hyp
+        self.image_weights = image_weights
+        self.rect = False if image_weights else rect
+        self.isMosaic = self.isAugment and not self.rect  # load 4 images at a time into a mosaic (only during training)
 
-        # init image list 
-        self.imgs = [None] * numFiles
-        # init labels list
-        self.labels = [np.zeros((0, 5), dtype=np.float32)] * numFiles
-        # init bool to check if labels are already cached
-        isLabelsLoaded = False
-        # init numMissing, numFound, numDuplicate
-        numMissing, numFound, numEmpty, numDuplicate = 0, 0, 0, 0  
-        # init path to save/retrieve cached labels in .npy file
-        cachedLabelsFile = str(Path(self.labelFiles[0]).parent) + '.npy' 
+        # Define labels
+        self.label_files = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt')
+                            for x in self.imgFiles]
 
-        # check if cached labels file exists
-        if os.path.isfile(cachedLabelsFile):
-            shapefile = cachedLabelsFile
-            # load cached labels file
-            x = np.load(cachedLabelsFile, allow_pickle=True)
-            # check if number of cached labels is equal to total number of files/labels
-            if len(x) == numFiles:
-                # assign labels
+        # Read image shapes (wh)
+        sp = path.replace('.txt', '') + '.shapes'  # shapefile path
+        try:
+            with open(sp, 'r') as f:  # read existing shapefile
+                s = [x.split() for x in f.read().splitlines()]
+                assert len(s) == n, 'Shapefile out of sync'
+        except:
+            s = [exif_size(Image.open(f)) for f in tqdm(self.imgFiles, desc='Reading image shapes')]
+            np.savetxt(sp, s, fmt='%g')  # overwrites existing (if any)
+
+        self.shapes = np.array(s, dtype=np.float64)
+
+        # Rectangular Training  https://github.com/ultralytics/yolov3/issues/232
+        if self.rect:
+            # Sort by aspect ratio
+            s = self.shapes  # wh
+            ar = s[:, 1] / s[:, 0]  # aspect ratio
+            irect = ar.argsort()
+            self.imgFiles = [self.imgFiles[i] for i in irect]
+            self.label_files = [self.label_files[i] for i in irect]
+            self.shapes = s[irect]  # wh
+            ar = ar[irect]
+
+            # Set training image shapes
+            shapes = [[1, 1]] * nb
+            for i in range(nb):
+                ari = ar[bi == i]
+                mini, maxi = ari.min(), ari.max()
+                if maxi < 1:
+                    shapes[i] = [maxi, 1]
+                elif mini > 1:
+                    shapes[i] = [1, 1 / mini]
+
+            self.batch_shapes = np.ceil(np.array(shapes) * img_size / 32. + pad).astype(np.int) * 32
+
+        # Cache labels
+        self.imgs = [None] * n
+        self.labels = [np.zeros((0, 5), dtype=np.float32)] * n
+        create_datasubset, extract_bounding_boxes, labels_loaded = False, False, False
+        nm, nf, ne, ns, nd = 0, 0, 0, 0, 0  # number missing, found, empty, datasubset, duplicate
+        np_labels_path = str(Path(self.label_files[0]).parent) + '.npy'  # saved labels in *.npy file
+        if os.path.isfile(np_labels_path):
+            s = np_labels_path  # print string
+            x = np.load(np_labels_path, allow_pickle=True)
+            if len(x) == n:
                 self.labels = x
-                # set isLabelsLoaded to true 
-                isLabelsLoaded = True
+                labels_loaded = True
         else:
-            # replace all instances of 'images' with 'labels' 
-            shapefile = path.replace('images', 'labels')
+            s = path.replace('images', 'labels')
 
-        # create a progress bar and iterate through label files
-        progressBar = tqdm(self.labelFiles)
-        for index, file in enumerate(progressBar):
-
-            # check if label is already loaded 
-            if isLabelsLoaded:
-                # assign current indexed label
-                label = self.labels[index]
-
+        pbar = tqdm(self.label_files)
+        for i, file in enumerate(pbar):
+            if labels_loaded:
+                l = self.labels[i]
+                # np.savetxt(file, l, '%g')  # save *.txt from *.npy file
             else:
                 try:
-                    # open file
                     with open(file, 'r') as f:
-                        # parse through file and assign to label
-                        label = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+                        l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
                 except:
-                    # if except is triggered then this means we have a missing file/label and increment our count 
-                    numMissing += 1  
+                    nm += 1  # print('missing labels for image %s' % self.img_files[i])  # file missing
                     continue
-            
-            # check if label is empty
-            if label.shape[0]:
-                # check if any duplicate rows
-                if np.unique(label, axis=0).shape[0] < label.shape[0]:  
-                    # if there are duplcicate rows then we have a duplicate file/label and increment our count 
-                    numDuplicate += 1  
 
-                # assing extracted label calue 
-                self.labels[index] = label
-                # increment our count of number of files found 
-                numFound += 1  
+            if l.shape[0]:
+                assert l.shape[1] == 5, '> 5 label columns: %s' % file
+                assert (l >= 0).all(), 'negative labels: %s' % file
+                assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
+                if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
+                    nd += 1  # print('WARNING: duplicate rows in %s' % self.label_files[i])  # duplicate rows
+                if single_cls:
+                    l[:, 0] = 0  # force dataset into single-class mode
+                self.labels[i] = l
+                nf += 1  # file found
 
+                # Create subdataset (a smaller dataset)
+                if create_datasubset and ns < 1E4:
+                    if ns == 0:
+                        create_folder(path='./datasubset')
+                        os.makedirs('./datasubset/images')
+                    exclude_classes = 43
+                    if exclude_classes not in l[:, 0]:
+                        ns += 1
+                        # shutil.copy(src=self.img_files[i], dst='./datasubset/images/')  # copy image
+                        with open('./datasubset/images.txt', 'a') as f:
+                            f.write(self.imgFiles[i] + '\n')
+
+                # Extract object detection boxes for a second stage classifier
+                if extract_bounding_boxes:
+                    p = Path(self.imgFiles[i])
+                    img = cv2.imread(str(p))
+                    h, w = img.shape[:2]
+                    for j, x in enumerate(l):
+                        f = '%s%sclassifier%s%g_%g_%s' % (p.parent.parent, os.sep, os.sep, x[0], j, p.name)
+                        if not os.path.exists(Path(f).parent):
+                            os.makedirs(Path(f).parent)  # make new output folder
+
+                        b = x[1:] * [w, h, w, h]  # box
+                        b[2:] = b[2:].max()  # rectangle to square
+                        b[2:] = b[2:] * 1.3 + 30  # pad
+                        b = xywh2xyxy(b.reshape(-1, 4)).ravel().astype(np.int)
+
+                        b[[0, 2]] = np.clip(b[[0, 2]], 0, w)  # clip boxes outside of image
+                        b[[1, 3]] = np.clip(b[[1, 3]], 0, h)
+                        assert cv2.imwrite(f, img[b[1]:b[3], b[0]:b[2]]), 'Failure extracting classifier boxes'
             else:
-                # increment our count of empty files
-                numEmpty += 1
+                ne += 1  # print('empty labels for image %s' % self.img_files[i])  # file empty
+                # os.system("rm '%s' '%s'" % (self.img_files[i], self.label_files[i]))  # remove
 
-            # add descriptive values to progress bar 
-            progressBar.desc = 'caching labels %s (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (shapefile, numFound, numMissing, numEmpty, numDuplicate, numFiles)
+            pbar.desc = 'Caching labels %s (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (
+                s, nf, nm, ne, nd, n)
+        assert nf > 0 or n == 20288, 'No labels found in %s. See %s' % (os.path.dirname(file) + os.sep, help_url)
+        if not labels_loaded and n > 1000:
+            print('Saving labels to %s for faster future loading' % np_labels_path)
+            np.save(np_labels_path, self.labels)  # save for next time
 
-        # if labels not cached already, save for next training
-        if not isLabelsLoaded and numFiles > 1000:
-            np.save(cachedLabelsFile, self.labels) 
+        # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
+        if cache_images:  # if training
+            gb = 0  # Gigabytes of cached images
+            pbar = tqdm(range(len(self.imgFiles)), desc='Caching images')
+            self.img_hw0, self.img_hw = [None] * n, [None] * n
+            for i in pbar:  # max 10k images
+                self.imgs[i], self.img_hw0[i], self.img_hw[i] = load_image(self, i)  # img, hw_original, hw_resized
+                gb += self.imgs[i].nbytes
+                pbar.desc = 'Caching images (%.1fGB)' % (gb / 1E9)
 
 
     def __len__(self):
@@ -450,7 +701,7 @@ class LoadImagesAndLabels(Dataset):
     def __getitem__(self, index):
         
         #extract hyperparameters 
-        hyp = self.hyperparameters
+        hyp = self.hyp
 
         # check if isMosaic is true
         if self.isMosaic:

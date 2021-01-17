@@ -128,7 +128,7 @@ def loadDarkNetWeights(self, weights, cutoff=-1):
         weights = np.fromfile(f, dtype=np.float32)  # the rest are weights
 
     ptr = 0
-    for idx, (moduleDef, module) in enumerate(zip(self.moduleDefinitions[:cutoff], self.module_list[:cutoff])):
+    for idx, (moduleDef, module) in enumerate(zip(self.moduleDefinitions[:cutoff], self.moduleList[:cutoff])):
         if moduleDef['type'] == 'convolutional':
             # extract conv
             conv = module[0]
@@ -244,7 +244,7 @@ class YOLOLayer(nn.Module):
         batchSize, _, numYGridPoints, numXGridPoints = prediction.shape  
 
         # check if there is a mismatch in grid sizes and create grids
-        if (self.numXGridPointsGridPoints, self.numYGridPoints) != (numXGridPoints, numYGridPoints):
+        if (self.numXGridPoints, self.numYGridPoints) != (numXGridPoints, numYGridPoints):
             self.creatGrids((numXGridPoints, numYGridPoints), prediction.device)
 
         # reshape prediction accordingly 
