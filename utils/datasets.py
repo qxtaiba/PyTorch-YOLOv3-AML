@@ -533,23 +533,21 @@ class LoadImages:
 #             l[:, 0] = i
 
 #         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
+
 class LoadImagesAndLabels(Dataset):  # for training/testing
-    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_images=False, single_cls=False, pad=0.0):
-        try:
-            path = str(Path(path))  # os-agnostic
-            parent = str(Path(path).parent) + os.sep
-            if os.path.isfile(path):  # file
-                with open(path, 'r') as f:
-                    f = f.read().splitlines()
-                    f = [x.replace('./', parent) if x.startswith('./') else x for x in f]  # local to global path
-            elif os.path.isdir(path):  # folder
-                f = glob.iglob(path + os.sep + '*.*')
-            else:
-                raise Exception('%s does not exist' % path)
-            self.imgFiles = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in acceptedImageFormats]
-        except:
-            raise Exception('Error loading data from %s. See %s' % (path, help_url))
+    def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, cache_images=False, pad=0.0):
+        
+        path = str(Path(path))  # os-agnostic
+        parent = str(Path(path).parent) + os.sep
+        if os.path.isfile(path):  # file
+            with open(path, 'r') as f:
+                f = f.read().splitlines()
+                f = [x.replace('./', parent) if x.startswith('./') else x for x in f]  # local to global path
+        elif os.path.isdir(path):  # folder
+            f = glob.iglob(path + os.sep + '*.*')
+        else:
+            raise Exception('%s does not exist' % path)
+        self.imgFiles = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in acceptedImageFormats]
 
         n = len(self.imgFiles)
         assert n > 0, 'No images found in %s. See %s' % (path, help_url)
@@ -561,8 +559,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.imageSize = img_size
         self.isAugment = augment
         self.hyp = hyp
-        self.image_weights = image_weights
-        self.rect = False if image_weights else rect
+        self.rect = rect
         self.isMosaic = self.isAugment and not self.rect  # load 4 images at a time into a mosaic (only during training)
 
         # Define labels
@@ -607,9 +604,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Cache labels
         self.imgs = [None] * n
         self.labels = [np.zeros((0, 5), dtype=np.float32)] * n
-        create_datasubset, extract_bounding_boxes, labels_loaded = False, False, False
-        nm, nf, ne, ns, nd = 0, 0, 0, 0, 0  # number missing, found, empty, datasubset, duplicate
-        np_labels_path = str(Path(self.label_files[0]).parent) + '.npy'  # saved labels in *.npy file
+        labels_loaded = False
+        nm, nf, ne, nd = 0, 0, 0, 0
+        np_labels_path = str(Path(self.label_files[0]).parent) + '.npy'  
         if os.path.isfile(np_labels_path):
             s = np_labels_path  # print string
             x = np.load(np_labels_path, allow_pickle=True)
@@ -623,59 +620,22 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         for i, file in enumerate(pbar):
             if labels_loaded:
                 l = self.labels[i]
-                # np.savetxt(file, l, '%g')  # save *.txt from *.npy file
             else:
                 try:
                     with open(file, 'r') as f:
                         l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
                 except:
-                    nm += 1  # print('missing labels for image %s' % self.img_files[i])  # file missing
+                    nm += 1  
                     continue
 
             if l.shape[0]:
-                assert l.shape[1] == 5, '> 5 label columns: %s' % file
-                assert (l >= 0).all(), 'negative labels: %s' % file
-                assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
-                if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
-                    nd += 1  # print('WARNING: duplicate rows in %s' % self.label_files[i])  # duplicate rows
-                if single_cls:
-                    l[:, 0] = 0  # force dataset into single-class mode
+                if np.unique(l, axis=0).shape[0] < l.shape[0]:  
+                    nd += 1  
                 self.labels[i] = l
-                nf += 1  # file found
+                nf += 1  
 
-                # Create subdataset (a smaller dataset)
-                if create_datasubset and ns < 1E4:
-                    if ns == 0:
-                        create_folder(path='./datasubset')
-                        os.makedirs('./datasubset/images')
-                    exclude_classes = 43
-                    if exclude_classes not in l[:, 0]:
-                        ns += 1
-                        # shutil.copy(src=self.img_files[i], dst='./datasubset/images/')  # copy image
-                        with open('./datasubset/images.txt', 'a') as f:
-                            f.write(self.imgFiles[i] + '\n')
-
-                # Extract object detection boxes for a second stage classifier
-                if extract_bounding_boxes:
-                    p = Path(self.imgFiles[i])
-                    img = cv2.imread(str(p))
-                    h, w = img.shape[:2]
-                    for j, x in enumerate(l):
-                        f = '%s%sclassifier%s%g_%g_%s' % (p.parent.parent, os.sep, os.sep, x[0], j, p.name)
-                        if not os.path.exists(Path(f).parent):
-                            os.makedirs(Path(f).parent)  # make new output folder
-
-                        b = x[1:] * [w, h, w, h]  # box
-                        b[2:] = b[2:].max()  # rectangle to square
-                        b[2:] = b[2:] * 1.3 + 30  # pad
-                        b = xywh2xyxy(b.reshape(-1, 4)).ravel().astype(np.int)
-
-                        b[[0, 2]] = np.clip(b[[0, 2]], 0, w)  # clip boxes outside of image
-                        b[[1, 3]] = np.clip(b[[1, 3]], 0, h)
-                        assert cv2.imwrite(f, img[b[1]:b[3], b[0]:b[2]]), 'Failure extracting classifier boxes'
             else:
-                ne += 1  # print('empty labels for image %s' % self.img_files[i])  # file empty
-                # os.system("rm '%s' '%s'" % (self.img_files[i], self.label_files[i]))  # remove
+                ne += 1  
 
             pbar.desc = 'Caching labels %s (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (
                 s, nf, nm, ne, nd, n)
